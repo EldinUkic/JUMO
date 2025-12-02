@@ -1,0 +1,28 @@
+<configuration>
+
+    <!-- === Eingabedateien === -->
+    <input>
+        <net-file value="osm.net.xml"/>
+        <additional-files value="osm.poly.xml"/>
+        <route-files value="osm.rou.xml"/>
+    </input>
+
+    <!-- === Simulationszeit === -->
+    <time>
+        <!-- Startzeit -->
+        <begin value="0"/>
+
+        <!-- Endzeit (z.B. 3600 Sekunden = 1 Stunde) -->
+        <end value="3600"/>
+
+        <!-- Schrittweite -->
+        <step-length value="1.0"/>
+    </time>
+
+    <!-- === Ausgabe / Logs (optional) === -->
+    <report>
+        <!-- Weniger Spam in der Konsole -->
+        <no-step-log value="true"/>
+    </report>
+
+</configuration>
