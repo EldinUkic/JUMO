@@ -1,0 +1,57 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "AppMain",
+            "request": "launch",
+            "mainClass": "rt.traffic.AppMain",
+            "projectName": "sumo_traffic_Simulation_ab075905"
+        },
+        {
+            "type": "java",
+            "name": "Launcher",
+            "request": "launch",
+            "mainClass": "rt.traffic.Launcher",
+            "projectName": "sumo_traffic_Simulation_ab075905"
+        },
+        {
+            "type": "java",
+            "name": "App",
+            "request": "launch",
+            "mainClass": "rt.traffic.App",
+            "projectName": "sumo_traffic_Simulation_1f58f5ff"
+        },
+        {
+            "type": "java",
+            "name": "Current File",
+            "request": "launch",
+            "mainClass": "${file}",
+            "vmArgs": "-Djava.library.path=${workspaceFolder}/lib --enable-native-access=ALL-UNNAMED"
+        },
+        {
+            "type": "java",
+            "name": "App",
+            "request": "launch",
+            "mainClass": "rt.traffic.App",
+            "projectName": "sumo-realtime-traffic-simulation",
+            "vmArgs": "-Djava.library.path=${workspaceFolder}/lib --enable-native-access=ALL-UNNAMED"
+        },
+        {
+            "type": "java",
+            "name": "RouterUpload",
+            "request": "launch",
+            "mainClass": "rt.traffic.backend.Routesup.RouterUpload",
+            "projectName": "sumo-realtime-traffic-simulation",
+            "vmArgs": "-Djava.library.path=${workspaceFolder}/lib --enable-native-access=ALL-UNNAMED"
+        },
+        {
+            "type": "java",
+            "name": "UiTest",
+            "request": "launch",
+            "mainClass": "rt.traffic.ui.UiTest",
+            "projectName": "sumo-realtime-traffic-simulation",
+            "vmArgs": "-Djava.library.path=${workspaceFolder}/lib --enable-native-access=ALL-UNNAMED"
+        }
+    ]
+}

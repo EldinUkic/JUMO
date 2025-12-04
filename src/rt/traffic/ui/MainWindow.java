@@ -16,11 +16,6 @@ public class MainWindow extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // Fenster schließen = Programm beenden
         setLayout(new BorderLayout()); // Layout: Norden, Süden, Westen, Osten, Mitte
 
-        // ----- Set -----
-
-        SetWindow SetWindow = new SetWindow();
-        SetWindow.setPreferredSize(new Dimension(260, 0)); // gleiche Breite wie rechts
-        add(SetWindow, BorderLayout.WEST);
 
         // ----- MapView -----
         // MapView ist meine Hauptanzeige, die mit osm.net.xml und osm.poly.xml
