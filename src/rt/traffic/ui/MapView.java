@@ -20,6 +20,13 @@ import java.util.*;
  * + Zoom und Pan:
  *   - Zoom per Mausrad
  *   - Verschieben per Drag mit linker Maustaste
+ *
+ * Fahrzeuge:
+ *   - gelbe, spitze Dreiecke in Fahrtrichtung
+ *
+ * Straßen:
+ *   - als dicke schwarze Bänder (ähnlich SUMO-Straßenfläche)
+ *   - dünne hellgraue Linien als Spurmarkierung
  */
 public class MapView extends JPanel {
 
@@ -34,6 +41,12 @@ public class MapView extends JPanel {
 
     // Aktuelle Fahrzeugpositionen (id -> Weltkoordinaten px/py aus SUMO)
     private final java.util.Map<String, Point2D.Double> vehiclePositions = new java.util.HashMap<>();
+
+    // Letzte Fahrzeugpositionen (für Richtungsberechnung)
+    private final java.util.Map<String, Point2D.Double> lastVehiclePositions = new java.util.HashMap<>();
+
+    // Fahrtrichtung pro Fahrzeug (Winkel in Radiant, in Bildschirm-Koordinaten)
+    private final java.util.Map<String, Double> vehicleAngles = new java.util.HashMap<>();
 
     // Minimale und maximale Koordinaten → brauche ich für Skalierung auf das Fenster
     private double minX = Double.POSITIVE_INFINITY;
@@ -83,7 +96,6 @@ public class MapView extends JPanel {
         addMouseWheelListener((MouseWheelEvent e) -> {
             int rotation = e.getWheelRotation();
 
-            // rauszoomen (rotation > 0), reinzoomen (rotation < 0)
             double oldZoom = zoomFactor;
             if (rotation < 0) {
                 zoomFactor *= 1.1;
@@ -91,11 +103,9 @@ public class MapView extends JPanel {
                 zoomFactor /= 1.1;
             }
 
-            // clampen
             if (zoomFactor < MIN_ZOOM) zoomFactor = MIN_ZOOM;
             if (zoomFactor > MAX_ZOOM) zoomFactor = MAX_ZOOM;
 
-            // Wenn sich Zoom wirklich geändert hat -> neu zeichnen
             if (Math.abs(zoomFactor - oldZoom) > 1e-6) {
                 repaint();
             }
@@ -122,7 +132,6 @@ public class MapView extends JPanel {
                     int dx = p.x - lastDragPoint.x;
                     int dy = p.y - lastDragPoint.y;
 
-                    // Pan in Bildschirm-Koordinaten (Pixel) verschieben
                     panX += dx;
                     panY += dy;
 
@@ -139,13 +148,12 @@ public class MapView extends JPanel {
     public void setStatsPanel(StatsPanel StatsPanel) {
         this.StatsPanel = StatsPanel;
 
-        // Direkt nach Laden einmal die Werte ins Panel schreiben
         if (StatsPanel != null) {
             StatsPanel.setLaneCount(laneShapes.size());
             StatsPanel.setPolygonCount(polygonShapes.size());
             StatsPanel.setJunctionCount(junctionPoints.size());
-            StatsPanel.setVehicleCount(0); // noch kein Simulationscode, daher 0
-            StatsPanel.setSimTime(0.0); // gleiche Idee: Startzeit = 0
+            StatsPanel.setVehicleCount(0);
+            StatsPanel.setSimTime(0.0);
         }
     }
 
@@ -155,10 +163,42 @@ public class MapView extends JPanel {
      * Erwartet Weltkoordinaten (px, py) aus VehicleServices.
      */
     public void updateVehiclePositions(java.util.Map<String, Point2D.Double> newPositions) {
-        vehiclePositions.clear();
-        if (newPositions != null) {
-            vehiclePositions.putAll(newPositions);
+        // IDs merken, die noch existieren
+        Set<String> stillThere = new HashSet<>(newPositions.keySet());
+
+        // Winkel & letzte Position aufräumen: alles löschen, was nicht mehr existiert
+        lastVehiclePositions.keySet().removeIf(id -> !stillThere.contains(id));
+        vehicleAngles.keySet().removeIf(id -> !stillThere.contains(id));
+
+        // Für jede neue Position Richtung berechnen (aus World-Koordinaten)
+        for (Map.Entry<String, Point2D.Double> entry : newPositions.entrySet()) {
+            String id = entry.getKey();
+            Point2D.Double current = entry.getValue();
+            Point2D.Double prev = lastVehiclePositions.get(id);
+
+            if (prev != null) {
+                double dxWorld = current.x - prev.x;
+                double dyWorld = current.y - prev.y;
+                double len2 = dxWorld * dxWorld + dyWorld * dyWorld;
+
+                if (len2 > 1e-8) {
+                    // Y-Achse wird beim Zeichnen invertiert → hier schon korrigieren
+                    double angleScreen = Math.atan2(-dyWorld, dxWorld);
+                    vehicleAngles.put(id, angleScreen);
+                }
+            } else {
+                // Neue Fahrzeuge: default Richtung nach rechts
+                if (!vehicleAngles.containsKey(id)) {
+                    vehicleAngles.put(id, 0.0);
+                }
+            }
+
+            lastVehiclePositions.put(id, current);
         }
+
+        vehiclePositions.clear();
+        vehiclePositions.putAll(newPositions);
+
         repaint();
     }
 
@@ -339,8 +379,7 @@ public class MapView extends JPanel {
             double sx = (p.x - minX) * scale + offsetX + panX;
 
             // Y-Achse ist invertiert, deshalb:
-            // zuerst Welt->Bild, dann invertieren, DANN panY addieren,
-            // damit Drag nach unten auch die Karte nach unten schiebt
+            // zuerst Welt->Bild, dann invertieren, DANN panY addieren
             double sy = height - ((p.y - minY) * scale + offsetY) + panY;
 
             return new Point2D.Double(sx, sy);
@@ -367,9 +406,13 @@ public class MapView extends JPanel {
             g2.fill(path);
         }
 
-        // ----- 2) Straßen (Lanes) -----
-        g2.setColor(Color.DARK_GRAY);
-        g2.setStroke(new BasicStroke(2.0f)); // Straßenbreite 2px
+        // ----- 2) Straßen – dicke schwarze Bänder -----
+        g2.setStroke(new BasicStroke(
+                10.0f,
+                BasicStroke.CAP_ROUND,
+                BasicStroke.JOIN_ROUND
+        ));
+        g2.setColor(Color.BLACK);
 
         for (java.util.List<Point2D.Double> lane : laneShapes) {
             Path2D path = new Path2D.Double();
@@ -389,36 +432,88 @@ public class MapView extends JPanel {
             g2.draw(path);
         }
 
-        // ----- 3) Junction-Punkte (gelbe Punkte) -----
+        // ----- 3) Spurmarkierung – dünne hellgraue Linien in der Mitte -----
+        g2.setStroke(new BasicStroke(
+                2.0f,
+                BasicStroke.CAP_ROUND,
+                BasicStroke.JOIN_ROUND,
+                10.0f,
+                new float[]{12.0f, 12.0f}, // gestrichelt
+                0.0f
+        ));
+        g2.setColor(new Color(200, 200, 200));
+
+        for (java.util.List<Point2D.Double> lane : laneShapes) {
+            Path2D path = new Path2D.Double();
+            boolean first = true;
+
+            for (Point2D.Double p : lane) {
+                Point2D.Double sp = toScreen.apply(p);
+
+                if (first) {
+                    path.moveTo(sp.x, sp.y);
+                    first = false;
+                } else {
+                    path.lineTo(sp.x, sp.y);
+                }
+            }
+
+            g2.draw(path);
+        }
+
+        // ----- 4) Junction-Punkte (gelbe Punkte) -----
+        g2.setStroke(new BasicStroke(1.0f));
         g2.setColor(Color.YELLOW);
         for (Point2D.Double jp : junctionPoints) {
             Point2D.Double sp = toScreen.apply(jp);
             int r = 6; // Radius
-
             g2.fillOval((int) (sp.x - r / 2.0), (int) (sp.y - r / 2.0), r, r);
         }
 
-        // ----- 4) Fahrzeuge (blaue Kästchen) -----
+        // ----- 5) Fahrzeuge (farbige Dreiecke) -----
         if (!vehiclePositions.isEmpty()) {
-            g2.setColor(Color.BLUE);
-            int size = 10; // etwas größer, damit man sie sicher sieht
-            for (Point2D.Double vp : vehiclePositions.values()) {
-                Point2D.Double sp = toScreen.apply(vp);
-                g2.fillRect(
-                        (int) (sp.x - size / 2.0),
-                        (int) (sp.y - size / 2.0),
-                        size,
-                        size
-                );
+            g2.setColor(Color.MAGENTA);
+            for (Map.Entry<String, Point2D.Double> entry : vehiclePositions.entrySet()) {
+                String id = entry.getKey();
+                Point2D.Double worldPos = entry.getValue();
+                Point2D.Double sp = toScreen.apply(worldPos);
+
+                double angle = vehicleAngles.getOrDefault(id, 0.0);
+
+                double size = 10.0;    // Länge des Dreiecks
+                double widthTri = 7.0; // ungefähre Breite hinten
+
+                double tipX = sp.x + Math.cos(angle) * size;
+                double tipY = sp.y + Math.sin(angle) * size;
+
+                double backDist = size * 0.6;
+                double baseCX = sp.x - Math.cos(angle) * backDist;
+                double baseCY = sp.y - Math.sin(angle) * backDist;
+
+                double nx = -Math.sin(angle);
+                double ny = Math.cos(angle);
+                double halfW = widthTri / 2.0;
+
+                double leftX = baseCX + nx * halfW;
+                double leftY = baseCY + ny * halfW;
+                double rightX = baseCX - nx * halfW;
+                double rightY = baseCY - ny * halfW;
+
+                int[] xs = {
+                        (int) Math.round(tipX),
+                        (int) Math.round(leftX),
+                        (int) Math.round(rightX)
+                };
+                int[] ys = {
+                        (int) Math.round(tipY),
+                        (int) Math.round(leftY),
+                        (int) Math.round(rightY)
+                };
+
+                g2.fillPolygon(xs, ys, 3);
             }
         }
 
-        // ----- Optional: erste Kreuzung rot hervorheben -----
-        if (!junctionPoints.isEmpty()) {
-            Point2D.Double sp = toScreen.apply(junctionPoints.get(0));
-            int r = 8;
-            g2.setColor(Color.RED);
-            g2.fillOval((int) (sp.x - r / 2.0), (int) (sp.y - r / 2.0), r, r);
-        }
+        
     }
 }
