@@ -4,6 +4,9 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import traffic.infrastructure.sumo.SumoPath;
@@ -14,10 +17,10 @@ import java.util.*;
 
 /**
  * Zeichnet das Netz aus osm.net.xml und die Polygone aus osm.poly.xml.
- * (Hier mache ich also die komplette grafische Darstellung des
- * SUMO-Kartennetzes)
+ * + Zoom und Pan:
+ *   - Zoom per Mausrad
+ *   - Verschieben per Drag mit linker Maustaste
  */
-
 public class MapView extends JPanel {
 
     // Liste aller Fahrspurlinien (jede Lane ist eine Liste von Punkten)
@@ -41,6 +44,18 @@ public class MapView extends JPanel {
     // Referenz auf StatsPanel, um Werte wie Lane-Anzahl usw. direkt zu setzen
     private StatsPanel StatsPanel;
 
+    // ---- Zoom und Pan State ----
+    private double zoomFactor = 1.0;
+    private final double MIN_ZOOM = 0.2;
+    private final double MAX_ZOOM = 5.0;
+
+    // Pan in Bildschirm-Koordinaten (Pixel)
+    private double panX = 0.0;
+    private double panY = 0.0;
+
+    // Für Drag-Bewegung
+    private Point lastDragPoint = null;
+
     public MapView() {
 
         // Hintergrundfarbe (leichtes Grau)
@@ -58,6 +73,67 @@ public class MapView extends JPanel {
         } catch (Exception e) {
             e.printStackTrace(); // falls XML kaputt oder nicht gefunden
         }
+
+        // ---- Maus-Handling für Zoom & Pan ----
+        initMouseControls();
+    }
+
+    private void initMouseControls() {
+        // Zoom per Mausrad
+        addMouseWheelListener((MouseWheelEvent e) -> {
+            int rotation = e.getWheelRotation();
+
+            // rauszoomen (rotation > 0), reinzoomen (rotation < 0)
+            double oldZoom = zoomFactor;
+            if (rotation < 0) {
+                zoomFactor *= 1.1;
+            } else if (rotation > 0) {
+                zoomFactor /= 1.1;
+            }
+
+            // clampen
+            if (zoomFactor < MIN_ZOOM) zoomFactor = MIN_ZOOM;
+            if (zoomFactor > MAX_ZOOM) zoomFactor = MAX_ZOOM;
+
+            // Wenn sich Zoom wirklich geändert hat -> neu zeichnen
+            if (Math.abs(zoomFactor - oldZoom) > 1e-6) {
+                repaint();
+            }
+        });
+
+        // Pan per Drag mit der linken Maustaste
+        MouseAdapter mouseAdapter = new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    lastDragPoint = e.getPoint();
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                lastDragPoint = null;
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (lastDragPoint != null && SwingUtilities.isLeftMouseButton(e)) {
+                    Point p = e.getPoint();
+                    int dx = p.x - lastDragPoint.x;
+                    int dy = p.y - lastDragPoint.y;
+
+                    // Pan in Bildschirm-Koordinaten (Pixel) verschieben
+                    panX += dx;
+                    panY += dy;
+
+                    lastDragPoint = p;
+                    repaint();
+                }
+            }
+        };
+
+        addMouseListener(mouseAdapter);
+        addMouseMotionListener(mouseAdapter);
     }
 
     public void setStatsPanel(StatsPanel StatsPanel) {
@@ -248,19 +324,24 @@ public class MapView extends JPanel {
         double scaleX = width / worldW;
         double scaleY = height / worldH;
 
-        // Gleicher Maßstab für beide Achsen → nichts verzerren
-        double scale = Math.min(scaleX, scaleY);
+        // Basismaßstab
+        double baseScale = Math.min(scaleX, scaleY);
 
-        // Zentrierung: Offset berechnen
+        // Zoom anwenden
+        double scale = baseScale * zoomFactor;
+
+        // Zentrierung: Offset berechnen (ohne Pan)
         double offsetX = (width - worldW * scale) / 2.0;
         double offsetY = (height - worldH * scale) / 2.0;
 
-        // Hilfsfunktion für Weltpunkt → Bildpunkt
+        // Hilfsfunktion für Weltpunkt → Bildpunkt (inkl. Pan)
         java.util.function.Function<Point2D.Double, Point2D.Double> toScreen = p -> {
-            double sx = (p.x - minX) * scale + offsetX;
+            double sx = (p.x - minX) * scale + offsetX + panX;
 
-            // Wichtig: Y-Achse ist invertiert, weil Java oben = 0 ist
-            double sy = height - ((p.y - minY) * scale + offsetY);
+            // Y-Achse ist invertiert, deshalb:
+            // zuerst Welt->Bild, dann invertieren, DANN panY addieren,
+            // damit Drag nach unten auch die Karte nach unten schiebt
+            double sy = height - ((p.y - minY) * scale + offsetY) + panY;
 
             return new Point2D.Double(sx, sy);
         };
