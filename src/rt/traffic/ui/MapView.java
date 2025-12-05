@@ -29,8 +29,10 @@ public class MapView extends JPanel {
     // Liste aller Junction-Punkte (für Marker)
     private final java.util.List<Point2D.Double> junctionPoints = new ArrayList<>();
 
-    // Minimale und maximale Koordinaten → brauche ich für Skalierung auf das
-    // Fenster
+    // Aktuelle Fahrzeugpositionen (id -> Weltkoordinaten px/py aus SUMO)
+    private final java.util.Map<String, Point2D.Double> vehiclePositions = new java.util.HashMap<>();
+
+    // Minimale und maximale Koordinaten → brauche ich für Skalierung auf das Fenster
     private double minX = Double.POSITIVE_INFINITY;
     private double maxX = Double.NEGATIVE_INFINITY;
     private double minY = Double.POSITIVE_INFINITY;
@@ -46,7 +48,6 @@ public class MapView extends JPanel {
 
         try {
             // Dateien werden hier direkt geladen.
-            // Pfade sind momentan absolute Pfade aus meinem lokalen Projekt.
             loadNetFile(SumoPath.netPath);
             loadPolyFile(SumoPath.polyPath);
 
@@ -70,6 +71,19 @@ public class MapView extends JPanel {
             StatsPanel.setVehicleCount(0); // noch kein Simulationscode, daher 0
             StatsPanel.setSimTime(0.0); // gleiche Idee: Startzeit = 0
         }
+    }
+
+    /**
+     * Wird von außen (z.B. MainWindow / Timer) aufgerufen, um die
+     * Fahrzeugpositionen zu aktualisieren.
+     * Erwartet Weltkoordinaten (px, py) aus VehicleServices.
+     */
+    public void updateVehiclePositions(java.util.Map<String, Point2D.Double> newPositions) {
+        vehiclePositions.clear();
+        if (newPositions != null) {
+            vehiclePositions.putAll(newPositions);
+        }
+        repaint();
     }
 
     // Aktualisiert die min/max Bounds, damit ich später das Zeichnen skalieren kann
@@ -99,8 +113,7 @@ public class MapView extends JPanel {
                 continue;
             Element edgeElem = (Element) node;
 
-            // Interne Kanten (SUMO generiert die für Logik, aber wir wollen sie NICHT
-            // zeichnen)
+            // Interne Kanten (SUMO generiert die für Logik, aber wir wollen sie NICHT zeichnen)
             if (edgeElem.hasAttribute("function")) {
                 if ("internal".equals(edgeElem.getAttribute("function"))) {
                     continue; // interne → überspringen
@@ -302,6 +315,21 @@ public class MapView extends JPanel {
             int r = 6; // Radius
 
             g2.fillOval((int) (sp.x - r / 2.0), (int) (sp.y - r / 2.0), r, r);
+        }
+
+        // ----- 4) Fahrzeuge (blaue Kästchen) -----
+        if (!vehiclePositions.isEmpty()) {
+            g2.setColor(Color.BLUE);
+            int size = 10; // etwas größer, damit man sie sicher sieht
+            for (Point2D.Double vp : vehiclePositions.values()) {
+                Point2D.Double sp = toScreen.apply(vp);
+                g2.fillRect(
+                        (int) (sp.x - size / 2.0),
+                        (int) (sp.y - size / 2.0),
+                        size,
+                        size
+                );
+            }
         }
 
         // ----- Optional: erste Kreuzung rot hervorheben -----

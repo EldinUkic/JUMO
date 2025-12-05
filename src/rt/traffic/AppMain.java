@@ -1,12 +1,12 @@
 package rt.traffic;
 
-import java.util.List;
 import java.util.Scanner;
 
-import org.eclipse.sumo.libtraci.Simulation;
-import rt.traffic.backend.*;
-import rt.traffic.backend.traciServices.*;
-import rt.traffic.backend.traciServices.VehicleServices.SpawnRequest;
+import javax.swing.SwingUtilities;
+
+import rt.traffic.backend.Sim;
+import rt.traffic.backend.traciServices.VehicleServices;
+import rt.traffic.ui.MainWindow;
 
 public class AppMain {
 
@@ -16,21 +16,30 @@ public class AppMain {
         String cfgPath = "src/traffic/infrastructure/sumo/osm.sumocfg";
         boolean useGui = true; // sumo-gui benutzen
 
-        // Backend + Simulation
+        // Backend + Simulation vorbereiten
         Sim sim = new Sim(cfgPath, useGui);
 
-        // SUMO-GUI direkt starten
+        // === Unsere eigene Swing-GUI (MainWindow) starten und Sim übergeben ===
+        SwingUtilities.invokeLater(() -> {
+            MainWindow w = new MainWindow(sim);
+            w.setLocationRelativeTo(null); // zentrieren
+            w.setVisible(true);
+        });
+
+        // SUMO-GUI und Simulation starten (blockiert im Main-Thread,
+        // GUI läuft über den EDT parallel)
         sim.run();
 
-        // Terminal-Steuerung
+        // Terminal-Steuerung (optional, kann man später auch entfernen)
         Scanner scanner = new Scanner(System.in);
 
         System.out.println("=== Traffic Simulation Control ===");
         System.out.println("1 = Play (Auto-Loop starten)");
         System.out.println("2 = Pause (Auto-Loop stoppen)");
         System.out.println("3 = Restart Simulation (neu laden)");
-        System.out.println("4 = Single Step (ein Schritt)");
-        System.out.println("5 = Exit (SUMO schließen)");
+        System.out.println("4 = Exit (SUMO schließen)");
+        System.out.println("5 = Spawn-Menu (Fahrzeuge erzeugen)");
+        System.out.println("6 = Show Live Vehicles");
         System.out.println("-----------------------------------");
 
         boolean running = true;
@@ -61,13 +70,13 @@ public class AppMain {
                 case "5":
                     VehicleServices.openSpawnMenu(scanner);
                     break;
-                
+
                 case "6":
                     VehicleServices.printAllVehicles();
-                        break;
+                    break;
 
                 default:
-                    System.out.println("Ungültig. Bitte 1–5 eingeben.");
+                    System.out.println("Ungültig. Bitte 1–6 eingeben.");
             }
         }
         scanner.close();

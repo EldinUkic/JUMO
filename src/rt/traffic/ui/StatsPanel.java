@@ -3,80 +3,94 @@ package rt.traffic.ui;
 import javax.swing.*;
 import java.awt.*;
 
+/**
+ * Zeigt Statistiken zur aktuellen Simulation an:
+ * - Anzahl Lanes
+ * - Anzahl Polygone
+ * - Anzahl Junctions
+ * - Anzahl Fahrzeuge
+ * - Durchschnittsgeschwindigkeit
+ * - (optional) Simulationszeit
+ *
+ * Die Werte werden über Setter-Methoden von außen aktualisiert.
+ */
 public class StatsPanel extends JPanel {
 
-    // Diese Labels zeigen die Zahlen aus dem MapView bzw. später aus der Simulation
-    // an
-    private JLabel lanesLabel; // Anzahl der Lanes (Straßenstücke)
-    private JLabel polysLabel; // Anzahl der gezeichneten Polygone
-    private JLabel junctionsLabel; // Anzahl der Junctions (Knotenpunkte)
-    private JLabel vehiclesLabel; // Anzahl der Fahrzeuge (kommt später aus TraaS/SUMO)
-    private JLabel simTimeLabel; // aktuelle Simulationszeit
+    private JLabel laneCountLabel;
+    private JLabel polygonCountLabel;
+    private JLabel junctionCountLabel;
+    private JLabel vehicleCountLabel;
+    private JLabel avgSpeedLabel;
+    private JLabel simTimeLabel;
 
     public StatsPanel() {
-        // Hintergrundfarbe: leichtes Grau für klare Abgrenzung zur Map
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         setBackground(new Color(245, 245, 245));
 
-        // Layout für geordnete vertikale Darstellung
-        setLayout(new GridBagLayout());
+        // Titel
+        JLabel title = new JLabel("Simulation Stats");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setAlignmentX(LEFT_ALIGNMENT);
 
-        // Layout-Konfigurator für jede einzelne Zeile
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0; // Alle Labels in Spalte 0
-        gbc.anchor = GridBagConstraints.WEST; // Links ausgerichtet
-        gbc.insets = new Insets(4, 20, 4, 10); // Außenabstände
+        add(title);
+        add(Box.createVerticalStrut(10));
 
-        // Titel am oberen Rand ("Statistics") – fett und größer
-        JLabel title = new JLabel("Statistics");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        laneCountLabel = createStatLabel("Lanes: 0");
+        polygonCountLabel = createStatLabel("Polygons: 0");
+        junctionCountLabel = createStatLabel("Junctions: 0");
+        vehicleCountLabel = createStatLabel("Vehicles: 0");
+        avgSpeedLabel = createStatLabel("Avg Speed: 0.00 m/s");
+        simTimeLabel = createStatLabel("Sim Time: 0.0 s");
 
-        gbc.gridy = 0; // oberste Position
-        gbc.insets = new Insets(20, 20, 10, 10); // extra Abstand über dem Titel
-        add(title, gbc);
+        add(laneCountLabel);
+        add(polygonCountLabel);
+        add(junctionCountLabel);
+        add(Box.createVerticalStrut(5));
+        add(vehicleCountLabel);
+        add(avgSpeedLabel);
+        add(simTimeLabel);
 
-        // Danach wieder normale Abstände für alle anderen Labels
-        gbc.insets = new Insets(4, 20, 4, 10);
-
-        // Alle Labels mit Startwerten (werden durch MapView gesetzt)
-        lanesLabel = new JLabel("Lanes: 0");
-        polysLabel = new JLabel("Polygons: 0");
-        junctionsLabel = new JLabel("Junctions: 0");
-        vehiclesLabel = new JLabel("Vehicles: 0");
-        simTimeLabel = new JLabel("Sim Time: 0.0s");
-
-        // Alle Labels nacheinander einfügen, jeweils eine Zeile tiefer
-        gbc.gridy = 1;
-        add(lanesLabel, gbc);
-        gbc.gridy = 2;
-        add(polysLabel, gbc);
-        gbc.gridy = 3;
-        add(junctionsLabel, gbc);
-        gbc.gridy = 4;
-        add(vehiclesLabel, gbc);
-        gbc.gridy = 5;
-        add(simTimeLabel, gbc);
+        add(Box.createVerticalGlue());
     }
 
-    // Wird von MapView oder später von der Simulation aufgerufen
-    public void setLaneCount(int n) {
-        lanesLabel.setText("Lanes: " + n);
+    private JLabel createStatLabel(String text) {
+        JLabel lbl = new JLabel(text);
+        lbl.setAlignmentX(LEFT_ALIGNMENT);
+        lbl.setFont(lbl.getFont().deriveFont(13f));
+        return lbl;
     }
 
-    public void setPolygonCount(int n) {
-        polysLabel.setText("Polygons: " + n);
+    // ----- Setter, die von MapView/MainWindow aufgerufen werden -----
+
+    public void setLaneCount(int count) {
+        laneCountLabel.setText("Lanes: " + count);
     }
 
-    public void setJunctionCount(int n) {
-        junctionsLabel.setText("Junctions: " + n);
+    public void setPolygonCount(int count) {
+        polygonCountLabel.setText("Polygons: " + count);
     }
 
-    // Platzhalter – echte Fahrzeugdaten kommen später über SUMO/TraaS
-    public void setVehicleCount(int n) {
-        vehiclesLabel.setText("Vehicles: " + n);
+    public void setJunctionCount(int count) {
+        junctionCountLabel.setText("Junctions: " + count);
     }
 
-    // Zeigt die aktuelle Simulationszeit in Sekunden mit 1 Nachkommastelle
-    public void setSimTime(double seconds) {
-        simTimeLabel.setText(String.format("Sim Time: %.1fs", seconds));
+    public void setVehicleCount(int count) {
+        vehicleCountLabel.setText("Vehicles: " + count);
+    }
+
+    /**
+     * Durchschnittsgeschwindigkeit in m/s (oder was VehicleServices liefert).
+     */
+    public void setAverageSpeed(double speed) {
+        avgSpeedLabel.setText(String.format("Avg Speed: %.2f m/s", speed));
+    }
+
+    /**
+     * Simulationszeit in Sekunden. Aktuell noch ein Stub – du kannst später
+     * aus dem Backend die tatsächliche Sim-Zeit setzen.
+     */
+    public void setSimTime(double timeSeconds) {
+        simTimeLabel.setText(String.format("Sim Time: %.1f s", timeSeconds));
     }
 }
