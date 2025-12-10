@@ -3,6 +3,20 @@
     "configurations": [
         {
             "type": "java",
+            "name": "AppMain",
+            "request": "launch",
+            "mainClass": "rt.traffic.AppMain",
+            "projectName": "sumo_traffic_Simulation_1f58f5ff"
+        },
+        {
+            "type": "java",
+            "name": "metricsTest",
+            "request": "launch",
+            "mainClass": "rt.traffic.application.analytics.metricsTest",
+            "projectName": "sumo_traffic_Simulation_1f58f5ff"
+        },
+        {
+            "type": "java",
             "name": "StartGUI",
             "request": "launch",
             "mainClass": "rt.traffic.ui.StartGUI",
