@@ -3,242 +3,631 @@ package rt.traffic.ui;
 import rt.traffic.backend.Sim;
 import rt.traffic.backend.traciServices.VehicleServices;
 import rt.traffic.backend.traciServices.VehicleServices.SpawnRequest;
+import rt.traffic.backend.traciServices.TrafficLightServices;
+import rt.traffic.backend.traciServices.TrafficLightServices.TrafficLightSnapshot;
 
+// Analytics
+import rt.traffic.application.analytics.AnalyticsExecution;
+import rt.traffic.application.analytics.Metrics;
+import rt.traffic.application.analytics.TrafficTracking;
+import rt.traffic.application.analytics.VehicleTracking;
+
+// SUMO / TraCI
 import org.eclipse.sumo.libtraci.Simulation;
+import org.eclipse.sumo.libtraci.Lane;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.DefaultListModel;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JFrame;
+import javax.swing.JList;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
+import javax.swing.ListSelectionModel;
+
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridLayout;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.geom.Point2D;
+
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class MainWindow extends JFrame {
 
-    private final Sim sim;         // Referenz auf die Simulation (Start, Stop, Step)
-    private MapView MapView;       // Kartenansicht (Straßennetz + Fahrzeuge)
-    private StatsPanel StatsPanel; // rechts angezeigtes Statistik-Panel
-    private JButton toggleButton;  // Button zum Ein-/Ausblenden des Statistikbereichs
+    private final Sim sim;
 
-    // GUI-Update-Timer (wie oft Fahrzeuge & Stats aktualisiert werden)
-    private javax.swing.Timer vehicleTimer;
+    private final MapView mapView;
+    private final StatsPanel statsPanel;
+
+    private final JButton toggleStatsButton;
+
+    private final JButton toggleTlPanelButton;
+    private final JPanel tlPanelWrapper;
+    private final TrafficLightControlPanel tlControlPanel;
+
+    // Export
+    private final JButton exportMetricsButton;
+    private final AnalyticsExecution analytics = new AnalyticsExecution();
+
+    private final javax.swing.Timer vehicleTimer;
+
+    private boolean traciReady = false;
+    private long lastLogMs = 0;
 
     public MainWindow(Sim sim) {
-        super("Real-Time Traffic Simulation"); // Fenstertitel setzen
+        super("Real-Time Traffic Simulation");
         this.sim = sim;
 
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // Fenster schließen = Programm beenden
-        setLayout(new BorderLayout()); // Layout: Norden, Süden, Westen, Osten, Mitte
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        setLayout(new BorderLayout());
+        setSize(1220, 780);
 
+        // CENTER: Map
+        mapView = new MapView();
+        add(mapView, BorderLayout.CENTER);
 
-        // ----- MapView -----
-        // MapView ist meine Hauptanzeige, die mit osm.net.xml und osm.poly.xml
-        // arbeitet.
-        // Wird später in der Mitte angezeigt.
-        MapView = new MapView();
+        // RIGHT: Stats
+        statsPanel = new StatsPanel();
+        statsPanel.setPreferredSize(new Dimension(260, 0));
+        add(statsPanel, BorderLayout.EAST);
+        mapView.setStatsPanel(statsPanel);
 
-        // ----- StatsPanel (rechts) -----
-        StatsPanel = new StatsPanel();
-        StatsPanel.setPreferredSize(new Dimension(260, 0)); // Breite 260px, Höhe egal
-        add(StatsPanel, BorderLayout.EAST); // rechts ans Fenster anhängen
+        // LEFT: Traffic Light Control
+        tlControlPanel = new TrafficLightControlPanel(mapView);
 
-        // MapView bekommt Zugriff auf StatsPanel, damit Basiswerte gesetzt werden
-        MapView.setStatsPanel(StatsPanel);
+        tlPanelWrapper = new JPanel(new BorderLayout());
+        tlPanelWrapper.setPreferredSize(new Dimension(340, 0));
+        tlPanelWrapper.add(tlControlPanel, BorderLayout.CENTER);
+        add(tlPanelWrapper, BorderLayout.WEST);
 
-        // ----- Obere Leiste (Toolbar) -----
+        // TOP BAR
         JPanel topBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
         add(topBar, BorderLayout.NORTH);
 
-        // === Steuerungs-Buttons wie in SUMO: Start / Stop / Step ===
-
-        // Start: Auto-Loop / Simulation laufen lassen
         JButton btnStart = new JButton("Start");
-        btnStart.addActionListener(e -> sim.play());
+        btnStart.addActionListener(e -> safeCall("sim.play()", sim::play));
 
-        // Stop: Auto-Loop anhalten
         JButton btnStop = new JButton("Stop");
-        btnStop.addActionListener(e -> sim.pause());
+        btnStop.addActionListener(e -> safeCall("sim.pause()", sim::pause));
 
-        // Step: Ein einzelner Simulationsschritt
         JButton btnStep = new JButton("Step");
-        btnStep.addActionListener(e -> {
-            try {
-                // Ein Simulationsschritt in SUMO
-                Simulation.step();
-                // Direkt danach die Vehicle-Liste aktualisieren
-                VehicleServices.vehiclePull();
-            } catch (Exception ex) {
-                ex.printStackTrace();
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Fehler bei Simulation.step():\n" + ex.getMessage(),
-                        "Step-Fehler",
-                        JOptionPane.ERROR_MESSAGE
-                );
-            }
-        });
+        btnStep.addActionListener(e -> safeCall("Simulation.step()", () -> {
+            Simulation.step();
+            VehicleServices.vehiclePull();
+            updateVehiclesSafely();
+        }));
 
-        // Fahrzeuge spawnen (GUI-Dialog)
         JButton btnSpawn = new JButton("Spawn...");
         btnSpawn.addActionListener(e -> openSpawnDialog());
 
-        // Hide/Show Stats
-        toggleButton = new JButton("Hide stats"); // Startzustand: Stats sind sichtbar
-        toggleButton.addActionListener(e -> toggleStats());
+        // Export Metrics (PDF + CSV)
+        exportMetricsButton = new JButton("Export metrics (PDF + CSV)");
+        exportMetricsButton.addActionListener(e -> exportMetricsPdfAndCsv());
 
-        // Buttons in die Toolbar einfügen
+        toggleTlPanelButton = new JButton("Hide TL panel");
+        toggleTlPanelButton.addActionListener(e -> toggleTlPanel());
+
+        toggleStatsButton = new JButton("Hide stats");
+        toggleStatsButton.addActionListener(e -> toggleStats());
+
         topBar.add(btnStart);
         topBar.add(btnStop);
         topBar.add(btnStep);
         topBar.add(btnSpawn);
         topBar.add(Box.createHorizontalStrut(10));
-        topBar.add(toggleButton);
+        topBar.add(exportMetricsButton);
+        topBar.add(Box.createHorizontalStrut(10));
+        topBar.add(toggleTlPanelButton);
+        topBar.add(toggleStatsButton);
 
-        // ----- MapView in die Mitte -----
-        add(MapView, BorderLayout.CENTER);
+        // LIVE UPDATE TIMER
+        vehicleTimer = new javax.swing.Timer(150, e -> updateVehiclesSafely());
+        vehicleTimer.start();
 
-        // ----- Live-Update für Fahrzeuge & Stats -----
-        int initialDelay = 150;
-        vehicleTimer = new javax.swing.Timer(initialDelay, e -> {
-            // Aktuelle Fahrzeugdaten aus dem Backend holen
+        // WINDOW CLOSE
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                System.out.println("[UI] Window closing → shutting down simulation");
+
+                try { if (vehicleTimer.isRunning()) vehicleTimer.stop(); } catch (Throwable ignored) {}
+                try { tlControlPanel.stopInternalTimer(); } catch (Throwable ignored) {}
+
+                try { sim.shutdown(); } catch (Throwable t) {
+                    System.err.println("[UI] Error during sim.shutdown(): " + t.getMessage());
+                }
+
+                dispose();
+                System.exit(0);
+            }
+        });
+    }
+
+    private boolean ensureTraciReady() {
+        if (traciReady) return true;
+        try {
+            Simulation.getTime();
+            traciReady = true;
+            System.out.println("[UI] TraCI connected -> live updates enabled");
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void updateVehiclesSafely() {
+        if (!ensureTraciReady()) return;
+
+        try {
+            // Vehicles
+            VehicleServices.vehiclePull();
             List<VehicleServices> vehicles = VehicleServices.getVehicleList();
 
-            // Map von ID -> Position (px, py) für die MapView bauen
             Map<String, Point2D.Double> positions = new HashMap<>();
             for (VehicleServices v : vehicles) {
                 positions.put(v.id, new Point2D.Double(v.px, v.py));
             }
+            mapView.updateVehiclePositions(positions);
 
-            // Fahrzeugpositionen in der MapView aktualisieren
-            MapView.updateVehiclePositions(positions);
+            statsPanel.setVehicleCount(vehicles.size());
+            statsPanel.setAverageSpeed(VehicleServices.getAverageSpeed());
+            try { statsPanel.setSimTime(Simulation.getTime()); } catch (Throwable ignored) {}
 
-            if (StatsPanel != null) {
-                // Fahrzeuganzahl
-                StatsPanel.setVehicleCount(vehicles.size());
-                // Durchschnittsgeschwindigkeit
-                double avgSpeed = VehicleServices.getAverageSpeed();
-                StatsPanel.setAverageSpeed(avgSpeed);
-                // SimTime könnt ihr später aus dem Backend setzen
-                // StatsPanel.setSimTime(...);
+            // Traffic lights
+            pushLiveTrafficLightStatesToMapAndPanel();
+
+        } catch (Throwable t) {
+            String msg = String.valueOf(t.getMessage()).toLowerCase();
+            if (msg.contains("not connected")) traciReady = false;
+
+            long now = System.currentTimeMillis();
+            if (now - lastLogMs > 1500) {
+                lastLogMs = now;
+                System.err.println("[UI] Live update failed: " + t);
             }
-        });
-        vehicleTimer.start();
-
-        // Fenstergröße einstellen
-        setSize(1220, 780);
+        }
     }
 
-    // GUI-Dialog zum Spawnen von Vehicles (statt Terminal-Menü)
-    private void openSpawnDialog() {
-        // Routen aus SUMO holen
-        java.util.List<String> routes = VehicleServices.getAllRouteIds();
-        if (routes.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Keine Routen gefunden. Ist eine .rou-Datei in SUMO geladen?",
-                    "Keine Routen",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            return;
+    private void pushLiveTrafficLightStatesToMapAndPanel() {
+        try {
+            TrafficLightServices.trafficLightPull();
+            List<TrafficLightSnapshot> tls = TrafficLightServices.getTrafficLightList();
+
+            Map<String, String> liveStates = new LinkedHashMap<>();
+            for (TrafficLightSnapshot s : tls) {
+                if (s != null && s.tlId != null && s.state != null) {
+                    liveStates.put(s.tlId, s.state);
+                }
+            }
+
+            mapView.setLiveTrafficLightStates(liveStates);
+            tlControlPanel.updateFromSnapshot(tls);
+
+        } catch (Throwable ignored) {}
+    }
+
+    // ==========================================================
+    // Export Metrics (PDF + CSV)  ✅ fixed IOException handling
+    // ==========================================================
+    private void exportMetricsPdfAndCsv() {
+        safeCall("Export metrics", () -> {
+            if (!ensureTraciReady()) {
+                JOptionPane.showMessageDialog(this,
+                        "TraCI noch nicht verbunden.\nStarte die Simulation kurz und versuche es erneut.");
+                return;
+            }
+
+            TrafficTracking tracking = buildTrafficTrackingFromBackend();
+
+            try {
+                Metrics metrics = analytics.executeMetrics(tracking);
+
+                // beide Exporte (werfen bei euch IOException)
+                metrics.exportToPdf();
+                metrics.exportToCsv();
+
+                JOptionPane.showMessageDialog(this,
+                        "Metrics exportiert:\n- PDF\n- CSV",
+                        "Export erfolgreich",
+                        JOptionPane.INFORMATION_MESSAGE);
+
+            } catch (java.io.IOException io) {
+                io.printStackTrace();
+                JOptionPane.showMessageDialog(this,
+                        "Export fehlgeschlagen (IO):\n" + io.getMessage(),
+                        "Export-Fehler",
+                        JOptionPane.ERROR_MESSAGE);
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this,
+                        "Export fehlgeschlagen:\n" + ex.getMessage(),
+                        "Export-Fehler",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+    }
+
+    private static TrafficTracking buildTrafficTrackingFromBackend() {
+        // Sim time
+        double simTime = 0.0;
+        try { simTime = Simulation.getTime(); } catch (Throwable ignored) {}
+
+        // Vehicles -> VehicleTracking
+        List<VehicleTracking> vehicles = new ArrayList<>();
+        try {
+            for (VehicleServices v : VehicleServices.getVehicleList()) {
+                vehicles.add(new VehicleTracking(v.id, v.edgeId, v.speed));
+            }
+        } catch (Throwable ignored) {}
+
+        // Edge lengths (meters)
+        Map<String, Double> edgeLengths = new HashMap<>();
+        for (VehicleTracking v : vehicles) {
+            String edgeId = v.edgeId;
+            if (edgeId == null || edgeId.isEmpty() || edgeLengths.containsKey(edgeId)) continue;
+
+            double len = 100.0; // fallback
+            try {
+                // lane id: edgeId_0 usually exists
+                len = Lane.getLength(edgeId + "_0");
+            } catch (Throwable ignored) {}
+
+            edgeLengths.put(edgeId, len);
         }
 
-        // UI-Komponenten für den Dialog
-        JComboBox<String> routeBox = new JComboBox<>(routes.toArray(new String[0]));
-        routeBox.setSelectedIndex(0);
+        return new TrafficTracking(simTime, vehicles, edgeLengths);
+    }
 
-        double currentFactor = VehicleServices.getSpawnRateFactor();
-
-        JSpinner rateSpinner = new JSpinner(
-                new SpinnerNumberModel(currentFactor, 0.1, 10.0, 0.1)
-        );
-
-        JSpinner countSpinner = new JSpinner(
-                new SpinnerNumberModel(5, 1, 500, 1)
-        );
-
-        JPanel panel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(4, 4, 4, 4);
-        gbc.anchor = GridBagConstraints.WEST;
-
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        panel.add(new JLabel("Route:"), gbc);
-
-        gbc.gridx = 1;
-        panel.add(routeBox, gbc);
-
-        gbc.gridx = 0;
-        gbc.gridy = 1;
-        panel.add(new JLabel("Spawnrate-Faktor:"), gbc);
-
-        gbc.gridx = 1;
-        panel.add(rateSpinner, gbc);
-
-        gbc.gridx = 0;
-        gbc.gridy = 2;
-        panel.add(new JLabel("Anzahl Fahrzeuge:"), gbc);
-
-        gbc.gridx = 1;
-        panel.add(countSpinner, gbc);
-
-        int result = JOptionPane.showConfirmDialog(
-                this,
-                panel,
-                "Fahrzeuge spawnen",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE
-        );
-
-        if (result != JOptionPane.OK_OPTION) {
-            return;
-        }
-
-        // Eingaben auslesen
-        String routeId = (String) routeBox.getSelectedItem();
-        double factor = ((Number) rateSpinner.getValue()).doubleValue();
-        int count = ((Number) countSpinner.getValue()).intValue();
-
-        // Spawnrate setzen (wird in VehicleServices begrenzt)
-        VehicleServices.setSpawnRateFactor(factor);
-
-        // VehicleType aus SUMO holen
-        String typeId = VehicleServices.getAnyVehicleTypeId();
-        if (typeId.isEmpty()) {
+    // ==========================================================
+    // UI helpers
+    // ==========================================================
+    private void safeCall(String label, Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable t) {
+            t.printStackTrace();
             JOptionPane.showMessageDialog(
                     this,
-                    "Kein gültiger VehicleType in SUMO gefunden.\nAbbruch.",
+                    "Fehler bei: " + label + "\n\n" + t.getMessage(),
                     "Fehler",
                     JOptionPane.ERROR_MESSAGE
             );
+        }
+    }
+
+    private void toggleStats() {
+        boolean visible = statsPanel.isVisible();
+        statsPanel.setVisible(!visible);
+        toggleStatsButton.setText(visible ? "Show stats" : "Hide stats");
+        revalidate();
+        repaint();
+    }
+
+    private void toggleTlPanel() {
+        boolean visible = tlPanelWrapper.isVisible();
+        tlPanelWrapper.setVisible(!visible);
+        toggleTlPanelButton.setText(visible ? "Show TL panel" : "Hide TL panel");
+        revalidate();
+        repaint();
+    }
+
+    private void openSpawnDialog() {
+        List<String> routes;
+        try {
+            routes = VehicleServices.getAllRouteIds();
+        } catch (Throwable t) {
+            JOptionPane.showMessageDialog(this, "Routen nicht verfügbar: " + t.getMessage());
             return;
         }
 
-        // SpawnRequests in die Queue legen
-        for (int i = 0; i < count; i++) {
-            String vehId = "gui_" + routeId + "_" + System.currentTimeMillis() + "_" + i;
-            SpawnRequest req = new SpawnRequest(vehId, routeId, typeId, -1);
-            VehicleServices.queueSpawn(req);
+        if (routes.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Keine Routen gefunden.");
+            return;
         }
 
-        JOptionPane.showMessageDialog(
-                this,
-                "Es wurden " + count + " Fahrzeuge in die Spawn-Queue gelegt.",
-                "Spawn erfolgreich",
-                JOptionPane.INFORMATION_MESSAGE
-        );
+        JComboBox<String> routeBox = new JComboBox<>(routes.toArray(new String[0]));
+        JSpinner countSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 500, 1));
+
+        JPanel panel = new JPanel(new GridLayout(2, 2));
+        panel.add(new JLabel("Route:"));
+        panel.add(routeBox);
+        panel.add(new JLabel("Anzahl:"));
+        panel.add(countSpinner);
+
+        if (JOptionPane.showConfirmDialog(
+                this, panel, "Fahrzeuge spawnen",
+                JOptionPane.OK_CANCEL_OPTION
+        ) != JOptionPane.OK_OPTION) return;
+
+        String routeId = (String) routeBox.getSelectedItem();
+        int count = (Integer) countSpinner.getValue();
+
+        String typeId = VehicleServices.getAnyVehicleTypeId();
+        if (typeId.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Kein VehicleType gefunden.");
+            return;
+        }
+
+        for (int i = 0; i < count; i++) {
+            VehicleServices.queueSpawn(
+                    new SpawnRequest(
+                            "gui_" + routeId + "_" + System.nanoTime(),
+                            routeId,
+                            typeId,
+                            -1
+                    )
+            );
+        }
     }
 
-    // Diese Methode blendet rechts das Statistikpanel ein/aus
-    private void toggleStats() {
-        boolean visible = StatsPanel.isVisible(); // merken, ob es gerade sichtbar ist
-        StatsPanel.setVisible(!visible); // Sichtbarkeit umschalten
+    // ==========================================================
+    // LEFT PANEL (phases only)
+    // ==========================================================
+    private static class TrafficLightControlPanel extends JPanel {
 
-        // Buttontext anpassen (wenn Panel vorher sichtbar war → jetzt "Show stats")
-        toggleButton.setText(visible ? "Show stats" : "Hide stats");
+        private final MapView mapView;
 
-        // Layout neu berechnen & neu zeichnen, damit das GUI korrekt aktualisiert wird
-        revalidate();
-        repaint();
+        private final JComboBox<String> tlIdBox;
+        private final JLabel liveStateLabel;
+        private final JLabel livePhaseLabel;
+        private final JLabel liveProgramLabel;
+
+        private final DefaultListModel<PhaseItem> phaseListModel;
+        private final JList<PhaseItem> phaseList;
+        private final JButton btnApplyPhase;
+
+        private final javax.swing.Timer uiTimer;
+
+        private List<TrafficLightSnapshot> lastSnapshots = new ArrayList<>();
+
+        private Set<String> lastIdSet = new LinkedHashSet<>();
+        private boolean suppressComboEvents = false;
+
+        TrafficLightControlPanel(MapView mapView) {
+            super(new BorderLayout());
+            this.mapView = mapView;
+
+            setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+            JLabel title = new JLabel("Traffic Lights");
+            title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+
+            JPanel top = new JPanel();
+            top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
+
+            JPanel row1 = new JPanel(new BorderLayout(8, 8));
+            row1.add(new JLabel("TL-ID:"), BorderLayout.WEST);
+            tlIdBox = new JComboBox<>(new String[] {});
+            row1.add(tlIdBox, BorderLayout.CENTER);
+
+            top.add(title);
+            top.add(Box.createVerticalStrut(10));
+            top.add(row1);
+
+            liveStateLabel = new JLabel("Live state: -");
+            livePhaseLabel = new JLabel("Live phase: -");
+            liveProgramLabel = new JLabel("Program: -");
+
+            liveStateLabel.setFont(liveStateLabel.getFont().deriveFont(13f));
+            livePhaseLabel.setFont(livePhaseLabel.getFont().deriveFont(13f));
+            liveProgramLabel.setFont(liveProgramLabel.getFont().deriveFont(13f));
+
+            top.add(Box.createVerticalStrut(10));
+            top.add(liveStateLabel);
+            top.add(livePhaseLabel);
+            top.add(liveProgramLabel);
+
+            add(top, BorderLayout.NORTH);
+
+            // Center
+            JPanel center = new JPanel();
+            center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+
+            JLabel phasesLbl = new JLabel("Select a phase (easy):");
+            phasesLbl.setFont(phasesLbl.getFont().deriveFont(Font.BOLD, 13f));
+            center.add(phasesLbl);
+            center.add(Box.createVerticalStrut(6));
+
+            phaseListModel = new DefaultListModel<>();
+            phaseList = new JList<>(phaseListModel);
+            phaseList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+
+            JScrollPane sp = new JScrollPane(phaseList);
+            sp.setPreferredSize(new Dimension(300, 230));
+            center.add(sp);
+
+            center.add(Box.createVerticalStrut(8));
+
+            btnApplyPhase = new JButton("Apply selected phase");
+            center.add(btnApplyPhase);
+
+            add(center, BorderLayout.CENTER);
+
+            btnApplyPhase.addActionListener(e -> applySelectedPhase());
+
+            tlIdBox.addActionListener(e -> {
+                if (suppressComboEvents) return;
+                rebuildPhaseList();
+                updateLabelsFromCurrentSelection();
+            });
+
+            uiTimer = new javax.swing.Timer(600, e -> {
+                if (isShowing()) updateLabelsFromCurrentSelection();
+            });
+            uiTimer.start();
+        }
+
+        void stopInternalTimer() {
+            try { uiTimer.stop(); } catch (Throwable ignored) {}
+        }
+
+        void updateFromSnapshot(List<TrafficLightSnapshot> snapshots) {
+            if (snapshots == null) return;
+            lastSnapshots = snapshots;
+
+            Set<String> ids = new LinkedHashSet<>();
+            for (TrafficLightSnapshot s : snapshots) {
+                if (s != null && s.tlId != null) ids.add(s.tlId);
+            }
+
+            if (!ids.equals(lastIdSet)) {
+                lastIdSet = ids;
+
+                String current = getSelectedTlId();
+
+                suppressComboEvents = true;
+                try {
+                    DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(ids.toArray(new String[0]));
+                    tlIdBox.setModel(model);
+
+                    if (current != null && ids.contains(current)) {
+                        tlIdBox.setSelectedItem(current);
+                    } else if (model.getSize() > 0) {
+                        tlIdBox.setSelectedIndex(0);
+                    }
+                } finally {
+                    suppressComboEvents = false;
+                }
+
+                rebuildPhaseList();
+            }
+
+            updateLabelsFromCurrentSelection();
+        }
+
+        private void updateLabelsFromCurrentSelection() {
+            TrafficLightSnapshot sel = findSnapshot(getSelectedTlId());
+            if (sel != null) {
+                liveStateLabel.setText("Live state: " + sel.state);
+                livePhaseLabel.setText("Live phase: " + sel.phaseIndex);
+                liveProgramLabel.setText("Program: " + (sel.programId != null ? sel.programId : "-"));
+            } else {
+                liveStateLabel.setText("Live state: -");
+                livePhaseLabel.setText("Live phase: -");
+                liveProgramLabel.setText("Program: -");
+            }
+        }
+
+        private String getSelectedTlId() {
+            Object o = tlIdBox.getSelectedItem();
+            return (o instanceof String) ? (String) o : null;
+        }
+
+        private TrafficLightSnapshot findSnapshot(String tlId) {
+            if (tlId == null) return null;
+            for (TrafficLightSnapshot s : lastSnapshots) {
+                if (s != null && tlId.equals(s.tlId)) return s;
+            }
+            return null;
+        }
+
+        private void rebuildPhaseList() {
+            phaseListModel.clear();
+
+            String tlId = getSelectedTlId();
+            if (tlId == null || tlId.isBlank()) return;
+
+            try {
+                List<MapView.UiTlPhase> phases = mapView.getUiPhasesFor(tlId);
+                if (phases == null || phases.isEmpty()) {
+                    phaseListModel.addElement(new PhaseItem(-1, "(No phases for this TL-ID)", 0, ""));
+                    return;
+                }
+
+                for (MapView.UiTlPhase p : phases) {
+                    String friendly = buildFriendlyPhaseName(p.state, (int) p.durationSeconds);
+                    phaseListModel.addElement(new PhaseItem(p.index, friendly, (int) p.durationSeconds, p.state));
+                }
+
+                if (phaseListModel.size() > 0) phaseList.setSelectedIndex(0);
+
+            } catch (Throwable t) {
+                phaseListModel.addElement(new PhaseItem(-1, "(Phase list unavailable: " + t.getMessage() + ")", 0, ""));
+            }
+        }
+
+        private static String buildFriendlyPhaseName(String state, int durS) {
+            if (state == null) state = "";
+            int g = 0, y = 0, r = 0, other = 0;
+
+            for (int i = 0; i < state.length(); i++) {
+                char c = state.charAt(i);
+                if (c == 'G' || c == 'g') g++;
+                else if (c == 'y' || c == 'Y') y++;
+                else if (c == 'r' || c == 'R') r++;
+                else other++;
+            }
+
+            String type;
+            if (y > 0 && g == 0) type = "Transition (YELLOW)";
+            else if (g > 0 && y == 0) type = "Go (GREEN)";
+            else if (r > 0 && g == 0 && y == 0) type = "Stop (RED)";
+            else if (g > 0 && y > 0) type = "Mixed (GREEN+YELLOW)";
+            else type = "Mixed";
+
+            return type + " | dur=" + durS + "s"
+                    + " | G:" + g + " Y:" + y + " R:" + r
+                    + (other > 0 ? (" ?:" + other) : "")
+                    + " | state=" + state;
+        }
+
+        private void applySelectedPhase() {
+            String tlId = getSelectedTlId();
+            if (tlId == null) {
+                JOptionPane.showMessageDialog(this, "Keine TL-ID ausgewählt.");
+                return;
+            }
+
+            PhaseItem item = phaseList.getSelectedValue();
+            if (item == null || item.phaseIndex < 0) {
+                JOptionPane.showMessageDialog(this, "Bitte eine gültige Phase auswählen.");
+                return;
+            }
+
+            try {
+                TrafficLightServices.setPhase(tlId, item.phaseIndex);
+            } catch (Throwable t) {
+                JOptionPane.showMessageDialog(this, "Fehler beim Setzen der Phase:\n" + t.getMessage());
+            }
+        }
+
+        private static class PhaseItem {
+            final int phaseIndex;
+            final String label;
+            final int durationS;
+            final String state;
+
+            PhaseItem(int phaseIndex, String label, int durationS, String state) {
+                this.phaseIndex = phaseIndex;
+                this.label = label;
+                this.durationS = durationS;
+                this.state = state;
+            }
+
+            @Override
+            public String toString() {
+                if (phaseIndex < 0) return label;
+                return "Phase " + phaseIndex + " — " + label;
+            }
+        }
     }
 }

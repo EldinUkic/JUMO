@@ -1,68 +1,62 @@
 package rt.traffic;
 
 import java.util.Scanner;
-// NEU:
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
 
 import javax.swing.SwingUtilities;
 
 import rt.traffic.backend.Sim;
+import rt.traffic.backend.traciServices.TrafficLightServices;
 import rt.traffic.backend.traciServices.VehicleServices;
 import rt.traffic.ui.MainWindow;
 
-// NEU: Analytics-Imports
+// Analytics-Imports
 import rt.traffic.application.analytics.AnalyticsExecution;
 import rt.traffic.application.analytics.Metrics;
 import rt.traffic.application.analytics.TrafficTracking;
 import rt.traffic.application.analytics.VehicleTracking;
 
-// NEU: für aktuelle Simulationszeit
+// Für aktuelle Simulationszeit
 import org.eclipse.sumo.libtraci.Simulation;
-
 import org.eclipse.sumo.libtraci.Lane;
 
-// MEIN TEIL IST PROVISORISCH ELDIN !!!!!!!
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
 
 public class AppMain {
 
     public static void main(String[] args) {
 
-        // Pfad zu deiner SUMO-Konfiguration (anpassen falls nötig)
         String cfgPath = "src/traffic/infrastructure/sumo/osm.sumocfg";
-        boolean useGui = false; // sumo-gui benutzen
+        boolean useGui = true;
 
-        // Backend + Simulation vorbereiten
         Sim sim = new Sim(cfgPath, useGui);
 
-        // NEU: Analytics-Instanz
         AnalyticsExecution analytics = new AnalyticsExecution();
 
-        // === Unsere eigene Swing-GUI (MainWindow) starten und Sim übergeben ===
         SwingUtilities.invokeLater(() -> {
             MainWindow w = new MainWindow(sim);
-            w.setLocationRelativeTo(null); // zentrieren
+            w.setLocationRelativeTo(null);
             w.setVisible(true);
         });
 
-        // SUMO-GUI und Simulation starten (blockiert im Main-Thread,
-        // GUI läuft über den EDT parallel)
+        // Backend starten (startet SUMO + TraCI)
         sim.run();
 
-        // Terminal-Steuerung (optional, kann man später auch entfernen)
         Scanner scanner = new Scanner(System.in);
 
         System.out.println("=== Traffic Simulation Control ===");
-        System.out.println("1 = Play (Auto-Loop starten)");
-        System.out.println("2 = Pause (Auto-Loop stoppen)");
-        System.out.println("3 = Restart Simulation (neu laden)");
-        System.out.println("4 = Exit (SUMO schließen)");
-        System.out.println("5 = Spawn-Menu (Fahrzeuge erzeugen)");
-        System.out.println("6 = Show Live Vehicles");
-        // NEU:
-        System.out.println("7 = Show Analytics (Konsole)");
+        System.out.println("1  = Play (Auto-Loop starten)");
+        System.out.println("2  = Pause (Auto-Loop stoppen)");
+        System.out.println("3  = Restart Simulation (neu laden)");
+        System.out.println("4  = Exit (SUMO schließen)");
+        System.out.println("5  = Spawn-Menu (Fahrzeuge erzeugen)");
+        System.out.println("6  = Show Live Vehicles");
+        System.out.println("7  = Show Analytics (Konsole)");
+        System.out.println("8  = Show Traffic Lights (IDs/Snapshot)");
+        System.out.println("9  = Configure Traffic Rule");
+        System.out.println("10 = Toggle Traffic Rule ON/OFF");
         System.out.println("-----------------------------------");
 
         boolean running = true;
@@ -98,7 +92,6 @@ public class AppMain {
                     VehicleServices.printAllVehicles();
                     break;
 
-                // NEU: Analytics-Ausgabe
                 case "7":
                     try {
                         TrafficTracking tracking = buildTrafficTrackingFromBackend();
@@ -112,46 +105,66 @@ public class AppMain {
                     }
                     break;
 
+                case "8":
+                    // Snapshot ziehen + ausgeben
+                    TrafficLightServices.trafficLightPull();
+                    TrafficLightServices.printAllTrafficLights();
+                    break;
+
+                case "9":
+                    System.out.print("TrafficLight ID: ");
+                    String tlId = scanner.nextLine().trim();
+
+                    System.out.print("Edge ID: ");
+                    String edgeId = scanner.nextLine().trim();
+
+                    System.out.print("Threshold (vehicles on edge): ");
+                    int threshold;
+                    try {
+                        threshold = Integer.parseInt(scanner.nextLine().trim());
+                    } catch (NumberFormatException e) {
+                        System.out.println("Ungültige Zahl.");
+                        break;
+                    }
+
+                    sim.configureRule(tlId, edgeId, threshold);
+                    break;
+
+                case "10":
+                    sim.toggleRule();
+                    break;
+
                 default:
-                    System.out.println("Ungültig. Bitte 1–7 eingeben.");
+                    System.out.println("Ungültig. Bitte 1–10 eingeben.");
+                    break;
             }
         }
+
         scanner.close();
     }
 
     // ==========================================================
-    // NEU: TrafficTracking aus der laufenden Simulation bauen
+    // TrafficTracking aus laufender Simulation bauen
     // ==========================================================
     private static TrafficTracking buildTrafficTrackingFromBackend() {
-        // 1) Aktuelle Sim-Zeit
-        double simTimeSeconds = Simulation.getTime();
+        double simTimeSeconds = 0.0;
+        try {
+            simTimeSeconds = Simulation.getTime();
+        } catch (Throwable ignored) {}
 
-        // 2) VehicleServices -> VehicleTracking umwandeln
         List<VehicleTracking> vehicles = new ArrayList<>();
         for (VehicleServices v : VehicleServices.getVehicleList()) {
-            vehicles.add(new VehicleTracking(
-                    v.id,
-                    v.edgeId,
-                    v.speed   // speed ist in m/s, passt zu speedMetersPerSecond
-            ));
+            vehicles.add(new VehicleTracking(v.id, v.edgeId, v.speed));
         }
 
-        // 3) Kantenlängen-Map aufbauen (ECHTE SUMO-WERTE)
         Map<String, Double> edgeLengthInMeters = new HashMap<>();
-
         for (VehicleTracking v : vehicles) {
             String edgeId = v.edgeId;
-            if (edgeId == null || edgeId.isEmpty() || edgeLengthInMeters.containsKey(edgeId)) {
-                continue;
-            }
+            if (edgeId == null || edgeId.isEmpty() || edgeLengthInMeters.containsKey(edgeId)) continue;
 
-            double lengthMeters = 100.0; // Fallback, falls irgendwas schiefgeht
-
+            double lengthMeters = 100.0;
             try {
-                // In SUMO heißen die Lanes meistens edgeId_0, edgeId_1, ...
-                // Alle Lanes einer Edge haben dieselbe Länge → eine reicht für die Edge.
-                String laneId = edgeId + "_0";
-                lengthMeters = Lane.getLength(laneId);
+                lengthMeters = Lane.getLength(edgeId + "_0");
             } catch (Exception e) {
                 System.err.println("[Analytics] Konnte Länge für Edge '" + edgeId
                         + "' nicht aus SUMO holen, benutze Fallback 100m.");
@@ -163,32 +176,16 @@ public class AppMain {
         return new TrafficTracking(simTimeSeconds, vehicles, edgeLengthInMeters);
     }
 
-    // ==========================================================
-    // NEU: Ausgabe der Metrics im Terminal
-    // ==========================================================
     private static void printMetricsToConsole(Metrics m) {
         System.out.println("\n=== Analytics / Metrics ===");
 
-        // --- globale Kennzahlen ---
         System.out.printf("Average speed: %.2f m/s (%.2f km/h)%n",
                 m.avgSpeedPerSecond, m.getAverageSpeedKmh());
         System.out.println("Vehicle count:      " + m.vehicleCount);
         System.out.println("Stopped vehicles:   " + m.stoppedVehicleCount);
-        // getStoppedRatio() liefert 0.0 - 1.0 -> für Prozent mit 100 multiplizieren
         System.out.printf("Stopped ratio:      %.2f%%%n", m.getStoppedRatio() * 100.0);
-        System.out.println();
-        System.out.println("Finished trips:     " + m.finishedTripCount);
-        System.out.printf("Average travel time: %.1f s%n", m.averageTravelTimeSeconds);
-        System.out.printf("Min travel time:     %.1f s%n", m.minTravelTimeSeconds);
-        System.out.printf("Max travel time:     %.1f s%n", m.maxTravelTimeSeconds);
-        System.out.println();
-        System.out.println("Short trips  (< 60 s):      " + m.shortTripsCount);
-        System.out.println("Medium trips (60–300 s):    " + m.mediumTripsCount);
-        System.out.println("Long trips   (> 300 s):     " + m.longTripsCount);
-        System.out.println();
 
-        // --- Per-Edge-Metriken ---
-        System.out.println("=== Per-Edge metrics ===");
+        System.out.println("\n=== Per-Edge metrics ===");
         if (m.vehiclesPerEdge == null || m.vehiclesPerEdge.isEmpty()) {
             System.out.println("(Keine per-Edge Daten vorhanden)");
         } else {
@@ -209,10 +206,8 @@ public class AppMain {
                 );
             }
         }
-        System.out.println();
 
-        // --- Stau-Kanten nach neuer 60%-Regel ---
-        System.out.println("=== Congested edges (>= 60% stopped & min vehicles) ===");
+        System.out.println("\n=== Congested edges (>= 60% stopped & min vehicles) ===");
         List<String> congestedEdges = m.getCongestedEdges();
         if (congestedEdges.isEmpty()) {
             System.out.println("(Keine staugefährdeten Kanten nach 60%-Regel)");
