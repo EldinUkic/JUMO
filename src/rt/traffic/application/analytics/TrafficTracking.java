@@ -1,6 +1,13 @@
 // Author: Enur Redzepi 1407686
-// packages: java.util.List
-//			 java.util.Map
+/**
+ * TrafficTracking:
+ * Diese Klasse bildet ein momentanes Verkerhsgeschehen zu einem bestimmten zeitpunkt der Simulation ab.
+ * Sie hält:
+ * - Simulationszeit
+ * - Eine Liste an VehicleTracking Objekten also Fahrzeuge
+ * - und Die Kanten mit ihrer länge in Metern.
+ */
+
 
 package rt.traffic.application.analytics;
 

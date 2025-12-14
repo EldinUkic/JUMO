@@ -1,4 +1,13 @@
 // Author: Enur redzepi
+/**
+ * MetricsHistory:
+ * Eine klasse die als Hilfe für das Zeichnen dienen wird in dem es eine
+ * maximale anzahl an letzten Datensätzen hält innerhalb von listen.
+ * Zunächst unterstützt es nur die Anzahl Fahrzeuge und die Durchschnittliche geschwindigkeit, sowie 
+ * die Simulationszeit. 
+ * 
+ * 
+ */
 package rt.traffic.application.analytics;
 
 import java.util.ArrayList;

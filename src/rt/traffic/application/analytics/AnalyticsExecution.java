@@ -1,4 +1,16 @@
 // Author: Enur Redzepi
+/**AnalyticsExecution:
+ * - Berechnet Werte:
+ * + Anzahl Fahrzeuge
+ * + Anzahl stoppende Fahrzeuge
+ * + Anzahl fahrzeug pro Straße
+ * + Anzahl stoppende Fahrzeuge pro Straße
+ * + Verkehrsdichte per Straße
+ * 
+ * Idee:
+ * Berecne die Bais Daten und erstelle daraus ein Metrics Objekt.
+ * 
+*/
 package rt.traffic.application.analytics;
 
 // imports for execution

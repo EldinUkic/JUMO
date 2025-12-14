@@ -1,5 +1,12 @@
-// Author: Enur Redzepi 1407686
-
+// Author: Enur Redzepi 
+/**
+ * VehicleTracking:
+ * Diese Klasse bildet ein einzelnes Fahrzeug zu einem bestimmten Zeitpunkt der Simulation ab
+ * Sie hält:
+ * - Fahrzeug Namen
+ * - Die Kante auf der das Fahrzeug ist
+ * - und die Geschwindigkeit
+ */
 package rt.traffic.application.analytics;
 
 public class VehicleTracking {

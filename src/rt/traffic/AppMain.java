@@ -29,7 +29,7 @@ public class AppMain {
     public static void main(String[] args) {
 
         String cfgPath = "src/traffic/infrastructure/sumo/osm.sumocfg";
-        boolean useGui = true;
+        boolean useGui = false;
 
         Sim sim = new Sim(cfgPath, useGui);
 

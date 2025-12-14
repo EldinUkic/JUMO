@@ -1,7 +1,26 @@
 // Author: Enur Redzepi
+/**Metrics:
+ * - Berechnet Werte:
+ * + Durchschnitliche Geschwindigkeit in KmH
+ * + Anteil der stehenden Fahrzeuge
+ * + Anteil der Fahrzeuge pro Kante
+ * + Stau Kanten 
+ * + Die Durchschnittliche Fahrtdauer aller Fahrzeuge
+ * + Minimale Fahrtdauer insegesamt
+ * + Maximale Fahrtdauer insgesamt
+ * + Verteilung der Trips in :
+ * ++Kurz
+ * ++Mittel
+ * ++Lang
+ * + Anzahl der vollendeten Fahrten
+ * Idee:
+ * Auf der Basis von AnalyticsExecution berechneten wir hier die fehlenden Werte und bieten 2 Methoden zur Generierung der 
+ * Reports als PDF und CSV.
+ * 
+*/
 package rt.traffic.application.analytics;
+import org.eclipse.sumo.libtraci.Simulation;// Imports for execution
 
-// Imports for execution
 import java.util.Map;
 import java.util.List;
 import java.io.IOException;
@@ -200,7 +219,7 @@ public class Metrics {
     Files.createDirectories(dirPath);
 
     // 3) Dateinamen festlegen (z.B. mit Zeitstempel)
-    String fileName = "traffic_metrics_" + System.currentTimeMillis() + ".pdf";
+    String fileName = "traffic_metrics_" + String.format("%.2f", Simulation.getTime()) + ".pdf";
 
     // 4) Vollständigen Pfad bauen
     Path fullPath = dirPath.resolve(fileName);
@@ -221,6 +240,8 @@ public class Metrics {
             contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
 
             
+			newLine(contentStream, 0, -30,
+                    String.format("Simulation Time: %.2f sec", Simulation.getTime()));
             newLine(contentStream, 0, -30,
                     String.format("Average speed: %.2f km/h", getAverageSpeedKmh()));
             newLine(contentStream, 0, -15,
@@ -302,7 +323,7 @@ public class Metrics {
 		Files.createDirectories(dirPath);
 
 		// 3) Dateinamen festlegen (z.B. mit Zeitstempel)
-		String fileName = "traffic_metrics_" + System.currentTimeMillis() + ".csv";
+		String fileName = "traffic_metrics_" + String.format("%.2f", Simulation.getTime()) + ".csv";
 
 		// 4) Vollständigen Pfad bauen
 		Path path = dirPath.resolve(fileName);
@@ -313,7 +334,7 @@ public class Metrics {
 
 			writer.println("# Summary");
 			writer.println("metric" + sep + "value");
-
+			writer.println("Simulation Time" + sep + String.format("%.2f", Simulation.getTime()) + "s");
 			writer.println("Average vehicle Speed in Kmh" + sep + String.format("%.2f", getAverageSpeedKmh()));
 			writer.println("Vehicle Count" + sep + vehicleCount);
 			writer.println("Amount of stopped vehicles" + sep + stoppedVehicleCount);

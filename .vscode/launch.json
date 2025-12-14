@@ -6,6 +6,13 @@
             "name": "AppMain",
             "request": "launch",
             "mainClass": "rt.traffic.AppMain",
+            "projectName": "JUMO_e2a475c3"
+        },
+        {
+            "type": "java",
+            "name": "AppMain",
+            "request": "launch",
+            "mainClass": "rt.traffic.AppMain",
             "projectName": "JUMO_e5eb090e"
         },
         {
