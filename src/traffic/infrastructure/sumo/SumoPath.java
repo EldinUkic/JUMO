@@ -25,11 +25,7 @@ public class SumoPath {
         return polyPath;
     }
 
-<<<<<<< HEAD
-}
-=======
      public static String getExportPath() {
         return exports;
     }
 }
->>>>>>> 420b3f1 (Analytics: AnalyticsExecution, Metrics, MetricsHistory)

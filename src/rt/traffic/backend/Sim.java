@@ -2,27 +2,40 @@ package rt.traffic.backend;
 
 import org.eclipse.sumo.libtraci.Simulation;
 import org.eclipse.sumo.libtraci.StringVector;
-import org.eclipse.sumo.libtraci.Vehicle;
 
 import rt.traffic.backend.traciServices.VehicleServices;
+import rt.traffic.backend.traciServices.TrafficLightServices;
 
 public class Sim {
 
     private final String cfgFile;
     private final boolean useGui;
+
     private boolean autoRun = false;
     private boolean backendStarted = false;
     private Thread loopThread;
-    
 
-    // Konstruktor
+    // ===== Traffic Control Settings (Runtime) =====
+    private boolean ruleEnabled = false;
+    private String ruleTlId = null;
+    private String ruleEdgeId = null;
+    private int ruleThreshold = 5;
+
+    // welche Phasen sollen gesetzt werden?
+    private int ruleGreenPhase = 1;
+    private int ruleRedPhase = 0;
+
+    private long lastRuleApplyMs = 0;
+    private long ruleIntervalMs = 1000;
+
     public Sim(String cfgPath, boolean useGui) {
         this.cfgFile = cfgPath;
         this.useGui = useGui;
     }
 
-    // SUMO starten
     public void run() {
+        if (backendStarted) return;
+
         System.out.println("========== SimulationApp Start ==========");
         System.out.println("Config: " + cfgFile);
         System.out.println("=========================================\n");
@@ -41,12 +54,8 @@ public class Sim {
         System.out.println("[INFO] SUMO-Backend gestartet (" + sumoExec + ").");
     }
 
-    // Auto-Loop (Play)
     public void play() {
-        // Backend starten, falls noch nicht läuft
-        if (!backendStarted) {
-            run();
-        }
+        if (!backendStarted) run();
 
         if (autoRun) {
             System.out.println("[SIM] Läuft schon.");
@@ -59,24 +68,27 @@ public class Sim {
         loopThread = new Thread(() -> {
             try {
                 while (autoRun) {
+                    Simulation.step();
 
-                    Simulation.step();                // 1 Schritt
                     VehicleServices.vehiclePull();
- 
+                    TrafficLightServices.trafficLightPull();
+
+                    // Regel anwenden
+                    applyTrafficRuleIfEnabled();
+
                     VehicleServices.applySpawns(Simulation.getTime());
-                    
-                    Thread.sleep(100);                // 100 ms warten
+
+                    Thread.sleep(100);
                 }
                 System.out.println("[SIM] Loop-Thread beendet.");
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        });
+        }, "SimulationApp-Thread");
 
         loopThread.start();
     }
 
-    // Pause: Auto-Loop stoppen
     public void pause() {
         if (!autoRun) {
             System.out.println("[SIM] Ist schon pausiert.");
@@ -86,39 +98,84 @@ public class Sim {
         autoRun = false;
         System.out.println("[SIM] Pause (Auto-Loop gestoppt).");
 
-        // kurz warten, bis Thread wirklich weg ist
         if (loopThread != null) {
             try {
                 loopThread.join(500);
             } catch (InterruptedException e) {
-                // Ignorieren oder loggen
                 System.out.println("[SIM] Pause-Join unterbrochen.");
             }
         }
     }
 
-    // Ein einzelner Step (für Step-Button)
-    public void stepOnce() {
-        if (!backendStarted) {
-            run();
+    // ===== Einfache regelbasierte Ampelsteuerung =====
+    private void applyTrafficRuleIfEnabled() {
+        if (!ruleEnabled) return;
+        if (ruleTlId == null || ruleTlId.isBlank()) return;
+        if (ruleEdgeId == null || ruleEdgeId.isBlank()) return;
+
+        long now = System.currentTimeMillis();
+        if (now - lastRuleApplyMs < ruleIntervalMs) return;
+        lastRuleApplyMs = now;
+
+        int vehiclesOnEdge = VehicleServices.getVehicleOnEdge(ruleEdgeId).size();
+
+        int targetPhase = (vehiclesOnEdge >= ruleThreshold) ? ruleGreenPhase : ruleRedPhase;
+
+        // Nur setzen, wenn Phase wirklich wechseln muss (verhindert Spam)
+        try {
+            int current = TrafficLightServices.getPhase(ruleTlId);
+            if (current != targetPhase) {
+                TrafficLightServices.setPhase(ruleTlId, targetPhase);
+                System.out.println("[RULE] tl=" + ruleTlId + " edge=" + ruleEdgeId
+                        + " vehicles=" + vehiclesOnEdge + " threshold=" + ruleThreshold
+                        + " → phase " + targetPhase);
+            }
+        } catch (Throwable t) {
+            System.err.println("[RULE] Fehler beim Anwenden: " + t.getMessage());
         }
+    }
+
+    public void configureRule(String tlId, String edgeId, int threshold) {
+        this.ruleTlId = tlId;
+        this.ruleEdgeId = edgeId;
+        this.ruleThreshold = Math.max(1, threshold);
+
+        System.out.println("[RULE] configured: tlId=" + ruleTlId
+                + ", edgeId=" + ruleEdgeId
+                + ", threshold=" + ruleThreshold
+                + ", greenPhase=" + ruleGreenPhase
+                + ", redPhase=" + ruleRedPhase);
+    }
+
+    public void toggleRule() {
+        this.ruleEnabled = !this.ruleEnabled;
+        System.out.println("[RULE] enabled=" + ruleEnabled);
+    }
+
+    public void stepOnce() {
+        if (!backendStarted) run();
 
         try {
             Simulation.step();
-            double t = Simulation.getTime();
-            System.out.println("[SIM] Einzelstep, t = " + t);
+            VehicleServices.vehiclePull();
+            TrafficLightServices.trafficLightPull();
+
+            // Regel auch im Einzelstep anwenden
+            applyTrafficRuleIfEnabled();
+
+            VehicleServices.applySpawns(Simulation.getTime());
+
+            System.out.println("[SIM] Einzelstep, t = " + Simulation.getTime());
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // Restart (wie in deinem AppMain benutzt)
     public void restart() {
         shutdown();
         run();
     }
 
-    // Alles sauber beenden
     public void shutdown() {
         System.out.println("[SIM] Stop wird ausgeführt...");
 
@@ -126,7 +183,7 @@ public class Sim {
 
         if (loopThread != null) {
             try {
-                loopThread.join(500);       // ⚠️ InterruptedException → try/catch
+                loopThread.join(500);
             } catch (InterruptedException e) {
                 System.out.println("[SIM] Stop-Join unterbrochen.");
             }
