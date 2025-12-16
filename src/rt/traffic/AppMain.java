@@ -14,7 +14,7 @@ import rt.traffic.application.analytics.Metrics;
 import rt.traffic.application.analytics.TrafficTracking;
 import rt.traffic.application.analytics.VehicleTracking;
 
-// SUMO
+// Für aktuelle Simulationszeit + Lane length
 import org.eclipse.sumo.libtraci.Simulation;
 import org.eclipse.sumo.libtraci.Lane;
 
@@ -45,6 +45,7 @@ public class AppMain {
         String cfgPath = "src/traffic/infrastructure/sumo/osm.sumocfg";
         boolean useGui = false; // true = sumo-gui, false = headless
 
+        // Backend + Simulation vorbereiten
         Sim sim = new Sim(cfgPath, useGui);
         AnalyticsExecution analytics = new AnalyticsExecution();
 
@@ -80,9 +81,9 @@ public class AppMain {
         System.out.println("7  = Show Analytics");
         System.out.println("8  = Show Traffic Lights");
         System.out.println("9  = Configure Traffic Rule");
-        System.out.println("10 = Toggle Traffic Rule");
-        System.out.println("11 = Configure Stress Test");
-        System.out.println("12 = Toggle Stress Test");
+        System.out.println("10 = Toggle Traffic Rule ON/OFF");
+        System.out.println("11 = Configure Stress Test (vehicles per route)");
+        System.out.println("12 = Toggle Stress Test ON/OFF (spawn once)");
         System.out.println("-----------------------------------");
 
         boolean running = true;
@@ -159,7 +160,7 @@ public class AppMain {
                     break;
 
                 case "11":
-                    System.out.print("Vehicles per route: ");
+                    System.out.print("Vehicles per route (e.g. 100 or 200): ");
                     try {
                         int vpr = Integer.parseInt(scanner.nextLine().trim());
                         sim.configureStressTest(vpr);
@@ -174,6 +175,8 @@ public class AppMain {
 
                 default:
                     System.out.println("Ungültig. Bitte 1–12 eingeben.");
+                    break;
+
             }
         }
 
@@ -190,11 +193,13 @@ public class AppMain {
             simTimeSeconds = Simulation.getTime();
         } catch (Throwable ignored) {}
 
+        // VehicleServices -> VehicleTracking umwandeln
         List<VehicleTracking> vehicles = new ArrayList<>();
         for (VehicleServices v : VehicleServices.getVehicleList()) {
             vehicles.add(new VehicleTracking(v.id, v.edgeId, v.speed));
         }
 
+        // Kantenlängen-Map aufbauen (ECHTE SUMO-WERTE, fallback 100m)
         Map<String, Double> edgeLengthInMeters = new HashMap<>();
 
         for (VehicleTracking v : vehicles) {
@@ -204,6 +209,7 @@ public class AppMain {
 
             double lengthMeters = 100.0;
             try {
+                // In SUMO heißen Lanes oft: edgeId_0, edgeId_1, ...
                 lengthMeters = Lane.getLength(edgeId + "_0");
             } catch (Exception e) {
                 System.err.println("[Analytics] Fallback length for edge " + edgeId);
@@ -216,12 +222,13 @@ public class AppMain {
     }
 
     // ==========================================================
-    // Metrics im Terminal ausgeben
+    // Ausgabe der Metrics im Terminal
     // ==========================================================
     private static void printMetricsToConsole(Metrics m) {
 
         System.out.println("\n=== Analytics / Metrics ===");
 
+        // --- globale Kennzahlen ---
         System.out.printf("Average speed: %.2f m/s (%.2f km/h)%n",
                 m.avgSpeedPerSecond, m.getAverageSpeedKmh());
 
@@ -229,6 +236,19 @@ public class AppMain {
         System.out.println("Stopped vehicles: " + m.stoppedVehicleCount);
         System.out.printf("Stopped ratio:    %.2f%%%n", m.getStoppedRatio() * 100.0);
 
+        // --- NEU: Trip-/Travel-Time-Kennzahlen (falls in Metrics vorhanden) ---
+        // (Wenn diese Felder bei dir noch nicht existieren, musst du die Metrics-Klasse aktualisieren.)
+        System.out.println();
+        System.out.println("Finished trips:     " + m.finishedTripCount);
+        System.out.printf("Average travel time: %.1f s%n", m.averageTravelTimeSeconds);
+        System.out.printf("Min travel time:     %.1f s%n", m.minTravelTimeSeconds);
+        System.out.printf("Max travel time:     %.1f s%n", m.maxTravelTimeSeconds);
+        System.out.println();
+        System.out.println("Short trips  (< 60 s):      " + m.shortTripsCount);
+        System.out.println("Medium trips (60–300 s):    " + m.mediumTripsCount);
+        System.out.println("Long trips   (> 300 s):     " + m.longTripsCount);
+
+        // --- Per-Edge-Metriken ---
         System.out.println("\n=== Per-Edge metrics ===");
         if (m.vehiclesPerEdge == null || m.vehiclesPerEdge.isEmpty()) {
             System.out.println("(Keine Daten)");
@@ -243,6 +263,17 @@ public class AppMain {
                         "Edge=%s | vehicles=%d | stopped=%d | density=%.3f veh/km%n",
                         edgeId, vehiclesOnEdge, stopped, density
                 );
+            }
+        }
+
+        // --- Stau-Kanten nach 60%-Regel ---
+        System.out.println("\n=== Congested edges (>= 60% stopped & min vehicles) ===");
+        List<String> congestedEdges = m.getCongestedEdges();
+        if (congestedEdges.isEmpty()) {
+            System.out.println("(Keine staugefährdeten Kanten nach 60%-Regel)");
+        } else {
+            for (String edgeId : congestedEdges) {
+                System.out.println("Congested edge: " + edgeId);
             }
         }
 

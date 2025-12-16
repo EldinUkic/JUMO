@@ -2,6 +2,7 @@ package rt.traffic.backend;
 
 import org.eclipse.sumo.libtraci.Simulation;
 import org.eclipse.sumo.libtraci.StringVector;
+import org.eclipse.sumo.libtraci.Vehicle;
 
 import rt.traffic.backend.traciServices.VehicleServices;
 import rt.traffic.backend.traciServices.TrafficLightServices;
@@ -162,12 +163,10 @@ public class Sim {
         loopThread = new Thread(() -> {
             try {
                 while (autoRun) {
-                    Simulation.step();
 
+                    Simulation.step();                // 1 Schritt
                     VehicleServices.vehiclePull();
                     TrafficLightServices.trafficLightPull();
-
-                    // Regel anwenden
                     applyTrafficRuleIfEnabled();
 
                     // NEU: Stress-Test anwenden
@@ -184,14 +183,13 @@ public class Sim {
                     }
 
                     VehicleServices.applySpawns(Simulation.getTime());
-
-                    Thread.sleep(100);
+                    Thread.sleep(100);                // 100 ms warten
                 }
                 System.out.println("[SIM] Loop-Thread beendet.");
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        }, "SimulationApp-Thread");
+        });
 
         loopThread.start();
     }
@@ -210,10 +208,12 @@ public class Sim {
         autoRun = false;
         System.out.println("[SIM] Pause (Auto-Loop gestoppt).");
 
+        // kurz warten, bis Thread wirklich weg ist
         if (loopThread != null) {
             try {
                 loopThread.join(500);
             } catch (InterruptedException e) {
+                // Ignorieren oder loggen
                 System.out.println("[SIM] Pause-Join unterbrochen.");
             }
         }
@@ -315,23 +315,15 @@ public class Sim {
         stressExecutedOnce = true;
     }
 
-    /**
-     * Setzt/ändert die Regel-Parameter.
-     *
-     * @param tlId      Ampel-ID (Traffic Light)
-     * @param edgeId    Edge-ID, auf der gezählt wird
-     * @param threshold Mindestanzahl Fahrzeuge für "grün"
-     */
+      
     public void configureRule(String tlId, String edgeId, int threshold) {
-        this.ruleTlId = tlId;
-        this.ruleEdgeId = edgeId;
-        this.ruleThreshold = Math.max(1, threshold);
+    this.ruleTlId = tlId;
+    this.ruleEdgeId = edgeId;
+    this.ruleThreshold = Math.max(1, threshold);
 
-        System.out.println("[RULE] configured: tlId=" + ruleTlId
-                + ", edgeId=" + ruleEdgeId
-                + ", threshold=" + ruleThreshold
-                + ", greenPhase=" + ruleGreenPhase
-                + ", redPhase=" + ruleRedPhase);
+    System.out.println("[RULE] configured: tlId=" + ruleTlId
+            + ", edgeId=" + ruleEdgeId
+            + ", threshold=" + ruleThreshold);
     }
 
     /**
@@ -339,8 +331,8 @@ public class Sim {
      * Beispiel: false -> true -> false -> ...
      */
     public void toggleRule() {
-        this.ruleEnabled = !this.ruleEnabled;
-        System.out.println("[RULE] enabled=" + ruleEnabled);
+    this.ruleEnabled = !this.ruleEnabled;
+    System.out.println("[RULE] enabled=" + ruleEnabled);
     }
 
     /**
@@ -399,8 +391,8 @@ public class Sim {
             applyStressTestIfEnabled();
 
             VehicleServices.applySpawns(Simulation.getTime());
-
-            System.out.println("[SIM] Einzelstep, t = " + Simulation.getTime());
+            double t = Simulation.getTime();
+            System.out.println("[SIM] Einzelstep, t = " + t);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -430,7 +422,7 @@ public class Sim {
 
         if (loopThread != null) {
             try {
-                loopThread.join(500);
+                loopThread.join(500);       // ⚠️ InterruptedException → try/catch
             } catch (InterruptedException e) {
                 System.out.println("[SIM] Stop-Join unterbrochen.");
             }

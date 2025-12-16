@@ -4,6 +4,7 @@ import rt.traffic.backend.Sim;
 
 import rt.traffic.backend.traciServices.VehicleServices;
 import rt.traffic.backend.traciServices.VehicleServices.SpawnRequest;
+
 import rt.traffic.backend.traciServices.TrafficLightServices;
 import rt.traffic.backend.traciServices.TrafficLightServices.TrafficLightSnapshot;
 
@@ -56,6 +57,62 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * MainWindow:
+ *
+ * Zentrale GUI-Klasse der Anwendung.
+ *
+ * Aufgaben dieser Klasse:
+ * - Baut das komplette Hauptfenster der Simulation auf (JFrame)
+ *   * CENTER: MapView (Karte mit Straßen, Fahrzeugen und Ampeln)
+ *   * RIGHT: StatsPanel (Live-Zahlen zur Simulation)
+ *   * LEFT: TrafficLightControlPanel (manuelle Ampelsteuerung)
+ *   * TOP: Steuerleiste mit Buttons (Start, Stop, Step, Spawn, Export, Toggle Panels)
+ *
+ * - Verbindet GUI und Backend:
+ *   * steuert die Simulation (sim.play / sim.pause / Simulation.step)
+ *   * holt regelmäßig Live-Daten über TraCI (Fahrzeuge, Ampelzustände)
+ *   * verteilt diese Daten an MapView und StatsPanel
+ *
+ * - Live-Update-Logik:
+ *   * eigener Swing-Timer (150 ms)
+ *   * prüft defensiv, ob TraCI verbunden ist
+ *   * verhindert Crashes und Log-Spam bei Verbindungsabbrüchen
+ *
+ * - Ampeln:
+ *   * bekommt LIVE-Ampelzustände aus dem Backend (TraCI)
+ *   * reicht sie an MapView (Zeichnung der Haltelinienfarben) weiter
+ *   * synchronisiert sie mit dem TrafficLightControlPanel
+ *   * erlaubt manuelle Phasenwahl pro TL-ID
+ *
+ * - Analytics / Export:
+ *   * sammelt aktuelle Simulationsdaten (TrafficTracking)
+ *   * triggert Berechnung der Metrics
+ *   * exportiert Ergebnisse als PDF und CSV
+ *
+ * - Sauberes Beenden:
+ *   * fängt Window-Close ab
+ *   * stoppt alle Timer
+ *   * ruft sim.shutdown() auf
+ *   * stellt sicher, dass SUMO/TraCI wirklich beendet wird
+ *
+ * - Stress Test (GUI):
+ *   * Button in der Top-Bar: "Stress Test: OFF/ON"
+ *   * Beim Einschalten fragt die GUI "Vehicles per route" ab und ruft:
+ *        sim.configureStressTest(vpr);
+ *        sim.toggleStressTest();
+ *     -> Backend queued dann EINMALIG Fahrzeuge (durch stressExecutedOnce Schutz)
+ *   * Beim Ausschalten ruft die GUI:
+ *        sim.toggleStressTest();
+ *
+ * Idee allgemein:
+ * - MainWindow enthält keine Zeichenlogik und keine Simulation-Logik im Detail.
+ * - Es ist der "Koordinator":
+ *   * UI-Events → Backend
+ *   * Backend-Daten → UI
+ * - Dadurch bleiben MapView, StatsPanel und Backend klar getrennt und austauschbar.
+ */
+
 public class MainWindow extends JFrame {
 
     // Backend-Steuerung (Start/Stop/Shutdown der Simulation)
@@ -79,6 +136,12 @@ public class MainWindow extends JFrame {
 
     // Export
     private final JButton exportMetricsButton;
+
+    // ✅ Stress Test Button (GUI)
+    private final JButton stressTestButton;
+
+    // ✅ UI merkt sich Stress-Status (Sim hat in eurer Version keinen Getter)
+    private boolean stressUiEnabled = false;
 
     // Analytics-Ausführung (berechnet aus TrafficTracking -> Metrics)
     private final AnalyticsExecution analytics = new AnalyticsExecution();
@@ -167,6 +230,12 @@ public class MainWindow extends JFrame {
         exportMetricsButton = new JButton("Export metrics (PDF + CSV)");
         exportMetricsButton.addActionListener(e -> exportMetricsPdfAndCsv());
 
+        // ✅ Stress Test Button (GUI):
+        // - OFF -> fragt vehicles/route, konfiguriert und toggled ON (Backend spawnt einmalig)
+        // - ON  -> toggled OFF
+        stressTestButton = new JButton("Stress Test: OFF");
+        stressTestButton.addActionListener(e -> toggleStressTestFromGui());
+
         toggleTlPanelButton = new JButton("Hide TL panel");
         toggleTlPanelButton.addActionListener(e -> toggleTlPanel());
 
@@ -181,6 +250,10 @@ public class MainWindow extends JFrame {
         // Abstandhalter, damit die Buttons optisch gruppiert sind
         topBar.add(Box.createHorizontalStrut(10));
         topBar.add(exportMetricsButton);
+
+        // ✅ Stress Test Button in die TopBar (eigener Block)
+        topBar.add(Box.createHorizontalStrut(10));
+        topBar.add(stressTestButton);
 
         topBar.add(Box.createHorizontalStrut(10));
         topBar.add(toggleTlPanelButton);
@@ -237,6 +310,106 @@ public class MainWindow extends JFrame {
     }
 
     // ----------------------------------------------------------
+    // Stress Test (GUI)
+    // ----------------------------------------------------------
+
+    /**
+     * Stress Test Toggle aus der GUI:
+     *
+     * Verhalten:
+     * - Wenn TraCI nicht ready ist: Hinweis anzeigen und abbrechen (sonst gibt es keine Routen/VehicleTypes).
+     * - Wenn Stress OFF:
+     *     * Vehicles-per-route abfragen
+     *     * sim.configureStressTest(vpr)
+     *     * sim.toggleStressTest() -> ON
+     *     * UI Text auf "ON"
+     * - Wenn Stress ON:
+     *     * sim.toggleStressTest() -> OFF
+     *     * UI Text auf "OFF"
+     *
+     * Hinweis zum Backend:
+     * - Euer Backend queued Fahrzeuge nur EINMALIG pro Einschalten (stressExecutedOnce).
+     * - Wenn erneut eingeschaltet wird, setzt toggleStressTest() stressExecutedOnce wieder auf false.
+     */
+    private void toggleStressTestFromGui() {
+        safeCall("Stress Test", () -> {
+            // Ohne TraCI macht es keinen Sinn (keine Routen/VehicleTypes abrufbar)
+            if (!ensureTraciReady()) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "TraCI noch nicht verbunden.\nStarte die Simulation kurz und versuche es erneut."
+                );
+                return;
+            }
+
+            // OFF -> ON (mit Konfiguration)
+            if (!stressUiEnabled) {
+                int vpr = askVehiclesPerRoute();
+                if (vpr <= 0) return; // abgebrochen
+
+                // Backend konfigurieren + einschalten
+                sim.configureStressTest(vpr);
+                sim.toggleStressTest();
+
+                stressUiEnabled = true;
+                stressTestButton.setText("Stress Test: ON");
+
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Stress Test eingeschaltet.\n"
+                                + "Vehicles per route: " + vpr + "\n"
+                                + "(Wird im Backend einmalig gequeued/spawned.)",
+                        "Stress Test",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+                return;
+            }
+
+            // ON -> OFF
+            sim.toggleStressTest();
+
+            stressUiEnabled = false;
+            stressTestButton.setText("Stress Test: OFF");
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Stress Test ausgeschaltet.",
+                    "Stress Test",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+        });
+    }
+
+    /**
+     * Dialog: Vehicles per route abfragen.
+     *
+     * - Default: 100
+     * - Min: 1
+     * - Max: 2000 (kannst du bei Bedarf erhöhen)
+     */
+    private int askVehiclesPerRoute() {
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(100, 1, 2000, 10));
+
+        JPanel panel = new JPanel(new GridLayout(1, 2));
+        panel.add(new JLabel("Vehicles per route:"));
+        panel.add(spinner);
+
+        int res = JOptionPane.showConfirmDialog(
+                this,
+                panel,
+                "Configure Stress Test",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        if (res != JOptionPane.OK_OPTION) return -1;
+
+        Object v = spinner.getValue();
+        if (v instanceof Integer) return (Integer) v;
+        return 100;
+    }
+
+    // ----------------------------------------------------------
     // TraCI Connection Guard
     // ----------------------------------------------------------
 
@@ -280,7 +453,6 @@ public class MainWindow extends JFrame {
                 // px/py kommen aus TraCI (SUMO Koordinaten)
                 positions.put(v.id, new Point2D.Double(v.px, v.py));
             }
-            mapView.updateVehiclePositions(positions);
 
             // Fahrzeuge auf der Karte updaten
             mapView.updateVehiclePositions(positions);
@@ -622,6 +794,7 @@ public class MainWindow extends JFrame {
 
             JLabel phasesLbl = new JLabel("Select a phase (easy):");
             phasesLbl.setFont(phasesLbl.getFont().deriveFont(Font.BOLD, 13f));
+
             center.add(phasesLbl);
             center.add(Box.createVerticalStrut(6));
 
@@ -710,6 +883,7 @@ public class MainWindow extends JFrame {
 
         private void updateLabelsFromCurrentSelection() {
             TrafficLightSnapshot sel = findSnapshot(getSelectedTlId());
+
             if (sel != null) {
                 liveStateLabel.setText("Live state: " + sel.state);
                 livePhaseLabel.setText("Live phase: " + sel.phaseIndex);
@@ -728,6 +902,7 @@ public class MainWindow extends JFrame {
 
         private TrafficLightSnapshot findSnapshot(String tlId) {
             if (tlId == null) return null;
+
             for (TrafficLightSnapshot s : lastSnapshots) {
                 if (s != null && tlId.equals(s.tlId)) return s;
             }
