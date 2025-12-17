@@ -3,6 +3,13 @@
     "configurations": [
         {
             "type": "java",
+            "name": "test",
+            "request": "launch",
+            "mainClass": "rt.traffic.application.test",
+            "projectName": "sumo_traffic_Simulation_1f58f5ff"
+        },
+        {
+            "type": "java",
             "name": "AppMain",
             "request": "launch",
             "mainClass": "rt.traffic.AppMain",

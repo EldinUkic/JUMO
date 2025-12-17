@@ -67,7 +67,7 @@ public class AnalyticsExecution {
 			sumSpeed = sumSpeed + v.speedMetersPerSecond;
 			count++;
 
-			boolean isStopped = v.speedMetersPerSecond <= 0.1;
+			boolean isStopped = v.speedMetersPerSecond == 0.0;
 			if (isStopped) {
 				// Then it is a standing vehicle
 				stoppedVehicleCount++;

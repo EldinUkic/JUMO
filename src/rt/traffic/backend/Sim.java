@@ -5,8 +5,10 @@ import org.eclipse.sumo.libtraci.StringVector;
 import org.eclipse.sumo.libtraci.Vehicle;
 
 import rt.traffic.backend.traciServices.VehicleServices;
+import rt.traffic.AppMain;
 import rt.traffic.backend.traciServices.TrafficLightServices;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 /**
  * Sim:
  * Diese Klasse ist der "Motor" deiner SUMO-Simulation.
@@ -33,7 +35,11 @@ import rt.traffic.backend.traciServices.TrafficLightServices;
  * - loopThread: eigener Thread, der alle 100ms Simulation.step() macht.
  */
 public class Sim {
+ private static final Logger log = LoggerFactory.getLogger(Sim.class);
 
+    private volatile boolean autoRun;
+    private Thread loopThread;
+    private boolean printedTrafficLightsOnce = false;
     // =========================
     // BASIS-EINSTELLUNGEN
     // =========================
@@ -44,21 +50,18 @@ public class Sim {
     // true = sumo-gui, false = sumo (headless)
     private final boolean useGui;
 
-    // Auto-Loop an/aus (Play/Pause)
-    private boolean autoRun = false;
+  
 
     // Merker: Backend (SUMO) schon gestartet?
     private boolean backendStarted = false;
 
-    // Thread für den Auto-Loop
-    private Thread loopThread;
+ 
 
     // =========================
     // DEMO / EINMAL-AUSGABEN
     // =========================
 
-    // NEU: Damit wir TrafficLights nur 1x drucken (und nicht jede 100ms nerven)
-    private boolean printedTrafficLightsOnce = false;
+
 
     // =========================
     // TRAFFIC RULE (AMPEL-REGEL)
@@ -161,37 +164,59 @@ public class Sim {
         System.out.println("[SIM] Play gestartet.");
 
         loopThread = new Thread(() -> {
-            try {
-                while (autoRun) {
+    log.info("[SIM] Loop-Thread gestartet (autoRun={})", autoRun);
 
-                    Simulation.step();                // 1 Schritt
-                    VehicleServices.vehiclePull();
-                    TrafficLightServices.trafficLightPull();
-                    applyTrafficRuleIfEnabled();
+    long stepCount = 0;
 
-                    // NEU: Stress-Test anwenden
-                    applyStressTestIfEnabled();
+    try {
+        while (autoRun) {
+            // Optional: Step zählen & Zeit lesen (super fürs Debugging)
+            stepCount++;
 
-                    // NEU: einmalig alle TrafficLights anzeigen (Debug/Demo)
-                    if (!printedTrafficLightsOnce) {
-                        try {
-                            TrafficLightServices.printAllTrafficLights();
-                        } catch (Throwable t) {
-                            System.err.println("[SIM] printAllTrafficLights Fehler: " + t.getMessage());
-                        }
-                        printedTrafficLightsOnce = true;
-                    }
+            // 1 Schritt
+            Simulation.step();
 
-                    VehicleServices.applySpawns(Simulation.getTime());
-                    Thread.sleep(100);                // 100 ms warten
+            // Debug-Log: kostet wenig, kann per logback.xml ein/ausgeschaltet werden
+            log.debug("[SIM] Step={} simTime={}", stepCount, Simulation.getTime());
+
+            VehicleServices.vehiclePull();
+            TrafficLightServices.trafficLightPull();
+
+            applyTrafficRuleIfEnabled();
+            applyStressTestIfEnabled();
+
+            // einmalig alle TrafficLights anzeigen (Debug/Demo)
+            if (!printedTrafficLightsOnce) {
+                try {
+                    TrafficLightServices.printAllTrafficLights();
+                    log.info("[SIM] printAllTrafficLights einmalig ausgeführt");
+                } catch (Throwable t) {
+                    // statt System.err: sauberer Stacktrace + Nachricht in Logdatei
+                    log.warn("[SIM] printAllTrafficLights fehlgeschlagen: {}", t.getMessage(), t);
                 }
-                System.out.println("[SIM] Loop-Thread beendet.");
-            } catch (Exception e) {
-                e.printStackTrace();
+                printedTrafficLightsOnce = true;
             }
-        });
 
-        loopThread.start();
+            VehicleServices.applySpawns(Simulation.getTime());
+
+            Thread.sleep(100); // 100 ms warten
+        }
+
+        log.info("[SIM] Loop-Thread beendet (steps={}, lastSimTime={})",
+                stepCount, Simulation.getTime());
+
+    } catch (InterruptedException ie) {
+        // Best practice: interrupt-flag wieder setzen
+        Thread.currentThread().interrupt();
+        log.info("[SIM] Loop-Thread unterbrochen (stop requested). steps={}", stepCount);
+
+    } catch (Exception e) {
+        // statt e.printStackTrace(): sauberer Fehler + Stacktrace + in Datei
+        log.error("[SIM] Unerwarteter Fehler im Loop-Thread nach steps={}", stepCount, e);
+    }
+}, "sim-loop");
+
+loopThread.start();
     }
 
     /**

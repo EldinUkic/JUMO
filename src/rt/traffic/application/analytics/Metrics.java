@@ -32,6 +32,7 @@ import java.util.ArrayList;
 
 // imports for PDF creation
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.contentstream.PDContentStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -211,108 +212,26 @@ public class Metrics {
 
 
 	public void exportToPdf() throws IOException {
-    // 1) Export-Ordner aus SumoPath holen
-    String exportDir = SumoPath.getExportPath();   
-
-    // 2) Ordner sicherstellen 
+    // 1) Export Ordner
+    String exportDir = SumoPath.getExportPath();
     Path dirPath = Paths.get(exportDir);
     Files.createDirectories(dirPath);
 
-    // 3) Dateinamen festlegen (z.B. mit Zeitstempel)
-    String fileName = "traffic_metrics_" + String.format("%.2f", Simulation.getTime()) + ".pdf";
-
-    // 4) Vollständigen Pfad bauen
+    // 2) Dateiname (Locale.US damit kein Komma im Namen)
+    String fileName = "traffic_metrics_" + String.format(java.util.Locale.US, "%.2f", Simulation.getTime()) + ".pdf";
     Path fullPath = dirPath.resolve(fileName);
 
-    // 5) PDF erzeugen & speichern
+    // 3) Content als Lines bauen
+    List<String> lines = buildPdfLines();
+
+    // 4) PDF schreiben (mit Auto-Seitenumbruch)
     try (PDDocument document = new PDDocument()) {
-        PDPage page = new PDPage();
-        document.addPage(page);
-
-        try (PDPageContentStream contentStream =
-                new PDPageContentStream(document, page)) {
-
-            contentStream.beginText();
-            contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 16);
-            contentStream.newLineAtOffset(50, 750);
-            contentStream.showText("Traffic Metrics Report");
-
-            contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
-
-            
-			newLine(contentStream, 0, -30,
-                    String.format("Simulation Time: %.2f sec", Simulation.getTime()));
-            newLine(contentStream, 0, -30,
-                    String.format("Average speed: %.2f km/h", getAverageSpeedKmh()));
-            newLine(contentStream, 0, -15,
-                    "Vehicle count: " + vehicleCount);
-            newLine(contentStream, 0, -15,
-                    "Stopped vehicles: " + stoppedVehicleCount);
-            newLine(contentStream, 0, -15,
-                    String.format("Stopped ratio: %.2f %%%%", getStoppedRatio() * 100.0));
-
-            newLine(contentStream, 0, -25,
-                    String.format("Finished trips: %d", finishedTripCount));
-            newLine(contentStream, 0, -15,
-                    String.format("Average travel time: %.1f s", averageTravelTimeSeconds));
-            newLine(contentStream, 0, -15,
-                    String.format("Min travel time: %.1f s", minTravelTimeSeconds));
-            newLine(contentStream, 0, -15,
-                    String.format("Max travel time: %.1f s", maxTravelTimeSeconds));
-
-            
-            newLine(contentStream, 0, -30,
-                    "Congested edges (>= 60% stopped & min vehicles):");
-
-            List<String> congestedEdges = getCongestedEdges();
-            if (congestedEdges == null || congestedEdges.isEmpty()) {
-                newLine(contentStream, 0, -15, "None");
-            } else {
-                for (String edgeId : congestedEdges) {
-                    newLine(contentStream, 0, -15, "- " + edgeId);
-                }
-            }
-
-            
-            newLine(contentStream, 0, -30, "Per-edge metrics (vehicles / density):");
-
-            if (vehiclesPerEdge == null || vehiclesPerEdge.isEmpty()) {
-                newLine(contentStream, 0, -15, "No per-edge data available.");
-            } else {
-                for (Map.Entry<String, Integer> entry : vehiclesPerEdge.entrySet()) {
-                    String edgeId = entry.getKey();
-                    int vehiclesOnEdge = entry.getValue();
-
-                    int stoppedOnEdge = 0;
-                    if (stoppedVehiclesPerEdge != null) {
-                        stoppedOnEdge = stoppedVehiclesPerEdge.getOrDefault(edgeId, 0);
-                    }
-
-                    double density = getDensityForEdge(edgeId); // veh/km
-
-                    String line = String.format(
-                            "%s: vehicles = %d, stopped = %d, density= %.1f veh per km",
-                            edgeId, vehiclesOnEdge, stoppedOnEdge, density
-                    );
-                    newLine(contentStream, 0, -15, line);
-                }
-            }
-
-            contentStream.endText();
-        }
-
+        writeLinesWithPageBreak(document, lines);
         document.save(fullPath.toString());
     }
 
     System.out.println("[Metrics] PDF exportiert nach: " + fullPath);
 }
-
-
-	// Newline methode
-	private void newLine(PDPageContentStream cs, float dx, float dy, String text) throws IOException {
-		cs.newLineAtOffset(dx, dy);
-		cs.showText(text);
-	}
 
 	public void exportToCsv() throws IOException {
 		// 1) Export-Ordner aus SumoPath holen
@@ -386,4 +305,124 @@ public class Metrics {
 
 		System.out.println("[Metrics] CSV exportiert nach: " + path.toAbsolutePath());
 	}
+
+	private List<String> buildPdfLines() {
+    List<String> lines = new ArrayList<>();
+
+    lines.add("Traffic Metrics Report");
+    lines.add(String.format(java.util.Locale.US, "Current Simulation Time: %.2f sec", Simulation.getTime()));
+    lines.add(String.format(java.util.Locale.US, "Average speed: %.2f km/h", getAverageSpeedKmh()));
+    lines.add("Amount of vehicles: " + vehicleCount);
+    lines.add("Amount of stopped vehicles: " + stoppedVehicleCount);
+    lines.add(String.format(java.util.Locale.US, "Stopped ratio: %.2f %%", getStoppedRatio() * 100.0));
+
+    lines.add(""); // blank line
+
+    lines.add(String.format(java.util.Locale.US, "Finished trips: %d", finishedTripCount));
+    lines.add(String.format(java.util.Locale.US, "Average travel time: %.1f s", averageTravelTimeSeconds));
+    lines.add(String.format(java.util.Locale.US, "Min travel time: %.1f s", minTravelTimeSeconds));
+    lines.add(String.format(java.util.Locale.US, "Max travel time: %.1f s", maxTravelTimeSeconds));
+
+    lines.add("");
+    lines.add("Congested edges:");
+
+    List<String> congestedEdges = getCongestedEdges();
+    if (congestedEdges == null || congestedEdges.isEmpty()) {
+        lines.add("None");
+    } else {
+        for (String edgeId : congestedEdges) {
+            lines.add("- " + edgeId);
+        }
+    }
+
+    lines.add("");
+    lines.add("Per edge metrics :");
+
+    if (vehiclesPerEdge == null || vehiclesPerEdge.isEmpty()) {
+        lines.add("No per edge data available right now !");
+    } else {
+		// Iterate over the Map vehiclesPerEdge
+        for (Map.Entry<String, Integer> entry : vehiclesPerEdge.entrySet()) {
+            String edgeId = entry.getKey(); 		// Get the Key of the Map
+            int vehiclesOnEdge = entry.getValue(); 	// Get the Value of the key
+
+            int stoppedOnEdge = 0;
+            if (stoppedVehiclesPerEdge != null) {
+				// Get the Amount of stopped vehicles in the Current iteration of the for loop
+                stoppedOnEdge = stoppedVehiclesPerEdge.getOrDefault(edgeId, 0); // Default is 0 !
+            }
+
+			// Get densitiy with my Method
+            double density = getDensityForEdge(edgeId);
+
+			// Print the data of the current Edge in this iteration
+            lines.add(String.format(java.util.Locale.US,
+                    "%s: vehicles=%d, stopped=%d, density=%.1f veh per km",
+                    edgeId, vehiclesOnEdge, stoppedOnEdge, density));
+        }
+    }
+
+    	return lines;
+	}
+
+	private void writeLinesWithPageBreak(PDDocument document, List<String> lines) throws IOException {
+    final float x = 50f;
+    final float topY = 750f;
+    final float bottomY = 60f;
+
+    // row height
+    final float leading = 15f;
+
+    // Use everywhere HELEVETICA
+    PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+    float fontSize = 12f;
+
+    float y = topY;
+
+    PDPageContentStream cs = null;
+
+    try {
+        cs = startNewPage(document, x, y, font, fontSize);
+
+        for (String line : lines) {
+            // Page break BEFORE writing line
+            if (y - leading < bottomY) {
+                cs.endText();
+                cs.close();
+
+                y = topY;
+                cs = startNewPage(document, x, y, font, fontSize);
+            }
+
+            cs.showText(line == null ? "" : line);
+            cs.newLineAtOffset(0, -leading);
+            y -= leading;
+        }
+
+        cs.endText();
+        cs.close();
+
+    } finally {
+        // safety in case of exceptions
+        if (cs != null) {
+            try { cs.close(); } catch (Exception ignore) {}
+        }
+    }
+}
+
+	private PDPageContentStream startNewPage(PDDocument document, float x, float y,
+                                        PDType1Font font, float fontSize) throws IOException {
+
+    PDPage page = new PDPage();
+    document.addPage(page);
+
+    PDPageContentStream cs = new PDPageContentStream(document, page);
+    cs.beginText();
+    cs.setFont(font, fontSize);
+    cs.newLineAtOffset(x, y);
+
+    return cs;
+	}
+
+	
 }

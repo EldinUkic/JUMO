@@ -1,0 +1,44 @@
+<configuration>
+
+    <!-- Log-Verzeichnis angeben -->
+    <property name="LOG_DIR" value="logs"/>
+    <property name="LOG_FILE" value="${LOG_DIR}/app.log"/>
+
+    <!-- Konsole -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- Zeit | Level | Logger-Klasse | Message -->
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Datei (mit Rotation) -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE}</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- jeden Tag eine Datei -->
+            <fileNamePattern>${LOG_DIR}/app.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <!-- wie viele Tage behalten -->
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{60} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Eure Projekt-Pakete: DEBUG -->
+    <logger name="rt.traffic" level="DEBUG"/>
+
+    <!-- Externe Libraries: eher ruhig halten -->
+    <logger name="org.eclipse" level="INFO"/>
+    <logger name="org.apache" level="INFO"/>
+
+    <!-- Root: INFO (alles andere) -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>
