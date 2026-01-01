@@ -6,47 +6,46 @@ import java.util.concurrent.ThreadLocalRandom;
 /*
  * StressTestServices
  *
- * Lasttest-Helfer:
- * - legt eine große Menge Spawn-Requests in kurzer Zeit ab
- * - verteilt diese zufällig auf alle vorhandenen Routen
+ * Dauer-Stress-Test:
+ * - queued regelmäßig Fahrzeuge über Zeit
+ * - läuft dauerhaft solange enabled=true
  *
  * Wichtig:
- * - es wird nur "gequeued"
- * - das echte Spawnen macht CarInjectionService.applySpawn() im Sim-Step
- * - der Test läuft absichtlich nur einmal pro Aktivierung
+ * - tickStressTest() MUSS pro Sim-Step aufgerufen werden
+ * - echtes Spawnen macht CarInjectionService.applySpawn()
  */
 public final class StressTestServices {
 
     // an/aus Schalter
     private static boolean enabled = false;
 
-    // damit es nicht bei jedem Tick erneut feuert
-    private static boolean executedOnce = false;
+    // wie viele Fahrzeuge PRO Intervall
+    private static int totalVehicles = 10;
 
-    // wie viele Fahrzeuge insgesamt gequeued werden sollen
-    private static int totalVehicles = 1000;
+    // alle wie viele Sim-Ticks gespawnt wird
+    private static final int INTERVAL_TICKS = 30;
+
+    // interner Tick-Zähler
+    private static int tickCounter = 0;
 
     private StressTestServices() {
     }
 
     /*
-     * Setzt die Anzahl der Fahrzeuge für den Stress-Test.
+     * Setzt die Anzahl der Fahrzeuge PRO Intervall.
+     * (Name bleibt aus Kompatibilitätsgründen gleich)
      */
     public static void configureStressTest(int total) {
         totalVehicles = Math.max(1, total);
-        System.out.println("[STRESS] totalVehicles=" + totalVehicles);
+        System.out.println("[STRESS] vehiclesPerInterval=" + totalVehicles);
     }
 
     /*
      * Schaltet den Stress-Test an/aus.
-     * Beim Einschalten wird executedOnce zurückgesetzt.
      */
     public static void toggleStressTest() {
         enabled = !enabled;
-
-        if (enabled) {
-            executedOnce = false;
-        }
+        tickCounter = 0;
 
         System.out.println("[STRESS] enabled=" + enabled);
     }
@@ -60,6 +59,7 @@ public final class StressTestServices {
 
     /*
      * Name bleibt so, falls es irgendwo schon benutzt wird.
+     * MUSS pro Sim-Step aufgerufen werden.
      */
     public static void tickStressTest() {
         applyStressTest();
@@ -67,27 +67,31 @@ public final class StressTestServices {
 
     /*
      * Wird pro Sim-Step aufgerufen.
-     * Wenn enabled=true und noch nicht ausgeführt -> queue die Fahrzeuge.
+     * Spawnt alle INTERVAL_TICKS einen Burst.
      */
     public static void applyStressTest() {
 
         if (!enabled)
             return;
-        if (executedOnce)
+
+        tickCounter++;
+
+        // noch nicht Zeit
+        if (tickCounter < INTERVAL_TICKS)
             return;
+
+        // Zeit erreicht → Burst
+        tickCounter = 0;
 
         List<RoutePreloader.RouteInfo> routes = RoutePreloader.loadRoutes();
         if (routes.isEmpty()) {
             System.out.println("[STRESS] No routes found.");
-            executedOnce = true;
             return;
         }
 
-        // VehicleType kommt jetzt aus CarInjection (VehicleServices hat das nicht mehr)
         String typeId = getDefaultTypeId();
         if (typeId.isBlank()) {
             System.out.println("[STRESS] No vehicle type found.");
-            executedOnce = true;
             return;
         }
 
@@ -95,18 +99,16 @@ public final class StressTestServices {
             int idx = ThreadLocalRandom.current().nextInt(routes.size());
             String routeId = routes.get(idx).routeId;
 
+            // nur queue, kein direktes Spawn
             CarInjectionService.requestSpawn(routeId, typeId, 1);
         }
 
         System.out.println("[STRESS] Queued " + totalVehicles
                 + " vehicles across " + routes.size() + " routes.");
-
-        executedOnce = true;
     }
 
     /*
      * Default Type für StressTest.
-     * Muss zu deinen VehicleTypes passen.
      */
     private static String getDefaultTypeId() {
         return "veh_passenger";

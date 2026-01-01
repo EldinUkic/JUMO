@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Run Jumo (Maven + libtraci)",
+      "request": "launch",
+      "mainClass": "rt.traffic.AppMain",
+      "cwd": "${workspaceFolder}",
+      "vmArgs": "--enable-native-access=ALL-UNNAMED -Djava.library.path=${workspaceFolder}/lib/nativ/mac"
+    },
+    {
+      "type": "java",
+      "name": "Run JUMO (Windows + libtraci)",
+      "request": "launch",
+      "mainClass": "rt.traffic.AppMain",
+      "cwd": "${workspaceFolder}",
+      "vmArgs": "--enable-native-access=ALL-UNNAMED -Djava.library.path=${workspaceFolder}\\lib\\nativ\\win"
+    }
+  ]
+}

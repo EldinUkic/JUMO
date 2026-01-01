@@ -2,12 +2,12 @@
 target/
 
 # IDE
-.vscode/
-.idea/
-*.iml
+
+
+
 
 # OS
-.DS_Store
+
 
 # Build output
 bin/
