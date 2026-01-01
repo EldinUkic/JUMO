@@ -15,7 +15,6 @@
     </properties>
 
     <dependencies>
-
         <!-- SUMO libtraci -->
         <dependency>
             <groupId>org.eclipse.sumo</groupId>
@@ -36,11 +35,34 @@
             <artifactId>fontbox</artifactId>
             <version>3.0.6</version>
         </dependency>
-
     </dependencies>
 
     <build>
         <plugins>
+
+            <!-- Auto-install local libtraci jar for teammates -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-install-plugin</artifactId>
+                <version>3.1.2</version>
+                <executions>
+                    <execution>
+                        <id>install-libtraci-jar</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>install-file</goal>
+                        </goals>
+                        <configuration>
+                            <file>${project.basedir}/lib/libtraci-1.26.0-SNAPSHOT.jar</file>
+                            <groupId>org.eclipse.sumo</groupId>
+                            <artifactId>libtraci</artifactId>
+                            <version>1.26.0-SNAPSHOT</version>
+                            <packaging>jar</packaging>
+                            <generatePom>true</generatePom>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
 
             <!-- Compiler -->
             <plugin>
