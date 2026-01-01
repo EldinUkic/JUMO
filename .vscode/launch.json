@@ -3,6 +3,24 @@
   "configurations": [
     {
       "type": "java",
+      "name": "Run JUMO (uses SUMO_HOME)",
+      "request": "launch",
+      "mainClass": "rt.traffic.AppMain",
+      "cwd": "${workspaceFolder}",
+      "vmArgs": "--enable-native-access=ALL-UNNAMED -Djava.library.path=${env:SUMO_HOME}/lib:${env:SUMO_HOME}/bin"
+    }
+  ]
+}
+
+
+
+
+
+/*{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
       "name": "Run Jumo (Maven + libtraci)",
       "request": "launch",
       "mainClass": "rt.traffic.AppMain",
@@ -18,4 +36,4 @@
       "vmArgs": "--enable-native-access=ALL-UNNAMED -Djava.library.path=${workspaceFolder}\\lib\\nativ\\win"
     }
   ]
-}
+}*/
